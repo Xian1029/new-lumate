@@ -50,6 +50,7 @@ export default function PracticePage() {
     health?.llm_status !== "mock_fallback" &&
     health?.llm_status !== "configuration_required";
   const tab = (searchParams.get("tab") ?? "quiz") as "quiz" | "flashcards" | "review";
+  const flashcardReviewScope = searchParams.get("scope") === "flashcards";
   const requestedNodeId = searchParams.get("node");
   const practiceExitHref = requestedNodeId
     ? `/course/${courseId}?node=${encodeURIComponent(requestedNodeId)}`
@@ -77,6 +78,7 @@ export default function PracticePage() {
           showReview
           aiActionsEnabled={aiActionsEnabled}
           defaultTab={tab}
+          scope={flashcardReviewScope ? "flashcards" : "all"}
           quizDifficultyHint={quizDifficultyHint}
           quizModeHint={quizModeHint}
           quizExitHref={practiceExitHref}

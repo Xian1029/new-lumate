@@ -39,6 +39,7 @@ from services.practice.answer_grading import (
     algebraic_expressions_equivalent,
     arithmetic_work_equivalent,
     named_quantities_with_classification_equivalent,
+    signed_offsets_with_total_relation_equivalent,
     signed_opposite_relation_equivalent,
     signed_quantities_equivalent,
 )
@@ -226,6 +227,50 @@ _RELATION_LABELS = {
 _RELATION_NUMBER = r"[+-]?(?:\d+\s*/\s*\d+|\d+(?:\.\d+)?|\.\d+)"
 _RELATION_NUMBER_LIST = rf"{_RELATION_NUMBER}(?:\s*(?:、|,|，|和|及|与)\s*{_RELATION_NUMBER})*"
 
+
+def _number_line_values_from_question(question: str) -> Optional[frozenset[Fraction]]:
+    """Read the explicit values between “表示” and “这…个数” in a drawing task."""
+    if not re.search(r"(?:画出|作图).{0,12}数轴", question):
+        return None
+    text = re.sub(
+        r"([+-]?)\s*\\d?frac\{(\d+)\}\{(\d+)\}",
+        lambda match: str(Fraction(
+            (-1 if match.group(1) == "-" else 1) * int(match.group(2)),
+            int(match.group(3)),
+        )),
+        question,
+    ).replace("\\", "").replace("$", "")
+    section = re.search(r"表示\s*(.+?)\s*这(?:些|[一二三四五六七八九十\d]+个)数", text)
+    if not section:
+        return None
+    tokens = re.findall(r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:/\d+)?", section.group(1))
+    try:
+        return frozenset(Fraction(token) for token in tokens)
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
+def _number_line_drawing_match(student: str, question_context: Optional[dict[str, Any]]) -> Optional[bool]:
+    """Grade a structured number-line drawing without relying on image recognition."""
+    question = str((question_context or {}).get("question") or "")
+    expected_values = _number_line_values_from_question(question)
+    if expected_values is None:
+        return None
+    marker = re.search(r"数轴标记\s*[:：]\s*([^\n]+)", normalize_answer(student))
+    if not marker:
+        return False
+    tokens = re.findall(r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:/\d+)?", marker.group(1))
+    try:
+        actual_values = frozenset(Fraction(token) for token in tokens)
+    except (ValueError, ZeroDivisionError):
+        return False
+    explanation = normalize_answer(student)
+    has_three_conditions = all(
+        re.search(pattern, explanation)
+        for pattern in (r"原点", r"正方向", r"单位\s*长度")
+    )
+    return actual_values == expected_values and has_three_conditions
+
 # Travel-direction corrections are a common K12 free-response pattern: the
 # learner first quotes an incorrect unsigned value and then supplies the
 # corrected signed value.  Treating the whole prose as a bag of numbers makes
@@ -374,6 +419,26 @@ def _structured_relation_match(student: str, expected: str) -> Optional[bool]:
     if student_sets is None or expected_sets is None:
         return None
     return student_sets == expected_sets
+
+
+def _all_possible_numeric_values_match(
+    student: str,
+    expected: str,
+    question_context: Optional[dict[str, Any]],
+) -> Optional[bool]:
+    """Compare “all possible values” as an unordered mathematical set.
+
+    Learners naturally enter one value per line or reverse the reference order.
+    Neither presentation choice changes the answer to a one-blank set question.
+    """
+    question = normalize_answer((question_context or {}).get("question") or "")
+    if not re.search(r"(?:所有|全部).{0,8}(?:可能|值)|写出.{0,8}所有", question):
+        return None
+    student_values = _relation_values(student)
+    expected_values = _relation_values(expected)
+    if student_values is None or expected_values is None or len(expected_values) < 2:
+        return None
+    return student_values == expected_values
 
 
 # ---------------------------------------------------------------------------
@@ -572,6 +637,51 @@ def _split_blanks(value: str) -> list[str]:
     return [part.strip() for part in _BLANK_SPLIT.split(str(value or "").strip()) if part.strip()]
 
 
+_BOUNDED_MASS_RANGE = re.compile(
+    r"(?<![\d.])(?P<lower>\d+(?:\.\d+)?)\s*(?P<lower_unit>kg|g|千克|克)?\s*"
+    r"(?:到|至|~|～|-)\s*(?P<upper>\d+(?:\.\d+)?)\s*(?P<upper_unit>kg|g|千克|克)(?![a-z])",
+    re.IGNORECASE,
+)
+
+
+def _mass_range_with_verdict(value: str) -> tuple[float, float, str, bool | None] | None:
+    """Read an explicit inclusive mass interval and any correctness judgment."""
+    text = normalize_answer(value)
+    matches = list(_BOUNDED_MASS_RANGE.finditer(text))
+    if len(matches) != 1:
+        return None
+    match = matches[0]
+    lower, upper = float(match.group("lower")), float(match.group("upper"))
+    if lower > upper:
+        return None
+    unit = {"克": "g", "千克": "kg"}.get(match.group("upper_unit").lower(), match.group("upper_unit").lower())
+    lower_unit = match.group("lower_unit")
+    if lower_unit and {"克": "g", "千克": "kg"}.get(lower_unit.lower(), lower_unit.lower()) != unit:
+        return None
+    if re.search(r"不(?:完全)?正确|不对|错误|说法(?:是)?错", text):
+        verdict: bool | None = False
+    elif re.search(r"正确|说法(?:是)?对", text):
+        verdict = True
+    else:
+        verdict = None
+    return lower, upper, unit, verdict
+
+
+def _bounded_mass_range_match(student: str, expected: str) -> bool | None:
+    student_range = _mass_range_with_verdict(student)
+    expected_range = _mass_range_with_verdict(expected)
+    if student_range is None or expected_range is None:
+        return None
+    s_lower, s_upper, s_unit, s_verdict = student_range
+    e_lower, e_upper, e_unit, e_verdict = expected_range
+    return (
+        s_unit == e_unit
+        and math.isclose(s_lower, e_lower, rel_tol=_DEFAULT_REL_TOL, abs_tol=_DEFAULT_ABS_TOL)
+        and math.isclose(s_upper, e_upper, rel_tol=_DEFAULT_REL_TOL, abs_tol=_DEFAULT_ABS_TOL)
+        and (e_verdict is None or s_verdict == e_verdict)
+    )
+
+
 def _grade_objective(question_type: str, student: str, expected: str, options: Any) -> GradingResult:
     """MC / select-all / matching / true-false: deterministic only."""
     s_norm = normalize_answer(student)
@@ -677,6 +787,26 @@ async def grade_answer(
         return _single_result(False, MatchType.INCORRECT, normalize_answer(s_structured),
                               normalize_answer(e_structured), "缺少答案")
 
+    number_line_match = _number_line_drawing_match(s_structured, question_context)
+    if number_line_match is not None:
+        return _single_result(
+            number_line_match,
+            MatchType.STRUCTURED_EQUIVALENT if number_line_match else MatchType.INCORRECT,
+            normalize_answer(s_structured), normalize_answer(e_structured),
+            "数轴标点和三要素完整" if number_line_match else "请检查标点是否齐全，并写出原点、正方向、单位长度",
+        )
+
+    all_values_match = _all_possible_numeric_values_match(
+        s_structured, e_structured, question_context,
+    )
+    if all_values_match is not None:
+        return _single_result(
+            all_values_match,
+            MatchType.STRUCTURED_EQUIVALENT if all_values_match else MatchType.INCORRECT,
+            normalize_answer(s_structured), normalize_answer(e_structured),
+            "所有可能值完整，顺序不影响答案" if all_values_match else "请检查是否写全所有可能的值",
+        )
+
     # A direction word problem may contain both the quoted mistake and the
     # corrected signed value. Resolve that structure before generic numeric
     # mismatch detection or semantic grading.
@@ -706,6 +836,17 @@ async def grade_answer(
     if signed_opposite_relation_equivalent(s_structured, e_structured):
         return _single_result(True, MatchType.STRUCTURED_EQUIVALENT, normalize_answer(s_structured),
                               normalize_answer(e_structured), "带符号数值和相反关系一致")
+    if signed_offsets_with_total_relation_equivalent(s_structured, e_structured):
+        return _single_result(True, MatchType.STRUCTURED_EQUIVALENT, normalize_answer(s_structured),
+                              normalize_answer(e_structured), "正负偏差与实际总质量关系一致")
+    bounded_range = _bounded_mass_range_match(s_structured, e_structured)
+    if bounded_range is not None:
+        return _single_result(
+            bounded_range,
+            MatchType.STRUCTURED_EQUIVALENT if bounded_range else MatchType.INCORRECT,
+            normalize_answer(s_structured), normalize_answer(e_structured),
+            "判断结论与质量范围一致" if bounded_range else "判断结论或质量范围不一致",
+        )
 
     # Whole-answer deterministic shortcuts for worked solutions (free_response).
     if qt == "free_response":
@@ -720,8 +861,9 @@ async def grade_answer(
                                   normalize_answer(e_structured), "代数式书写等价")
 
     # Multi-blank: grade blank-by-blank, never as one concatenated string.
-    s_blanks = _split_blanks(s_structured)
-    e_blanks = _split_blanks(e_structured)
+    is_multi_blank = qt == "fill_blank" or config["answer_kind"] in {"MULTI_BLANK", "MULTI_PART"}
+    s_blanks = _split_blanks(s_structured) if is_multi_blank else [s_structured]
+    e_blanks = _split_blanks(e_structured) if is_multi_blank else [e_structured]
     single_blank = len(e_blanks) <= 1
     if single_blank:
         s_blanks = [s_structured]
@@ -843,6 +985,11 @@ def grade_answer_deterministic(
         return True
     if signed_opposite_relation_equivalent(s_structured, e_structured):
         return True
+    if signed_offsets_with_total_relation_equivalent(s_structured, e_structured):
+        return True
+    bounded_range = _bounded_mass_range_match(s_structured, e_structured)
+    if bounded_range is not None:
+        return bounded_range
     if qt == "free_response":
         if arithmetic_work_equivalent(s_structured, e_structured):
             return True
@@ -850,8 +997,9 @@ def grade_answer_deterministic(
             return True
         if algebraic_expressions_equivalent(s_structured, e_structured):
             return True
-    s_blanks = _split_blanks(s_structured)
-    e_blanks = _split_blanks(e_structured)
+    is_multi_blank = qt == "fill_blank" or config["answer_kind"] in {"MULTI_BLANK", "MULTI_PART"}
+    s_blanks = _split_blanks(s_structured) if is_multi_blank else [s_structured]
+    e_blanks = _split_blanks(e_structured) if is_multi_blank else [e_structured]
     if len(e_blanks) <= 1:
         s_blanks, e_blanks = [s_structured], [e_structured]
     if len(s_blanks) != len(e_blanks):

@@ -95,14 +95,15 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # Skip exempt paths
-        if any(path.startswith(prefix) for prefix in _EXEMPT_PREFIXES):
-            return await call_next(request)
+        # Login/register cannot already have a token, so skip validation for
+        # them.  Do not return early: the response still needs to issue the
+        # CSRF cookie required by the next authenticated mutation.
+        is_exempt = any(path.startswith(prefix) for prefix in _EXEMPT_PREFIXES)
 
         method = request.method
 
         # Validate CSRF on mutating requests
-        if method in _MUTATING_METHODS:
+        if method in _MUTATING_METHODS and not is_exempt:
             cookie_token = request.cookies.get(_COOKIE_NAME, "")
             header_token = request.headers.get(_HEADER_NAME, "")
 
@@ -144,7 +145,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 max_age=_TOKEN_MAX_AGE,
                 httponly=False,  # Frontend needs to read this
                 samesite="strict",
-                secure=settings.environment != "development",
+                secure=settings.environment in {"production", "staging"},
                 path="/",
             )
 

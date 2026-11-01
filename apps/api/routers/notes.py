@@ -20,7 +20,7 @@ from services.auth.dependency import get_current_user
 from services.course_access import get_course_or_404
 from services.llm.readiness import ensure_llm_ready
 from services.content_text import is_assessment_content
-from services.parser.notes import build_fallback_notes, normalize_generated_markdown, restructure_notes
+from services.parser.notes import build_fallback_notes, is_primary_chinese, normalize_generated_markdown, restructure_notes
 from services.preference.engine import resolve_preferences
 
 router = APIRouter()
@@ -346,7 +346,10 @@ async def get_generated_note_for_node(
             # Legacy auto-generation could persist the extracted source as the
             # note body. Treat an exact raw-source match as a missing note and
             # return the deterministic structured version below.
-            if raw_source and markdown == raw_source:
+            if raw_source and (markdown == raw_source or (
+                is_primary_chinese(f"{node.title if node else asset.title}\n{raw_source}")
+                and not is_primary_chinese(markdown)
+            )):
                 return {
                     "id": f"fallback-{node_id}",
                     "title": normalize_generated_markdown(node.title if node else asset.title),

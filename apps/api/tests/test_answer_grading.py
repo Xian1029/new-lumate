@@ -7,6 +7,26 @@ REFERENCE = "李明增长 1.2kg，张华增长 -0.5kg，刘伟增长 0kg。其�
 EQUIVALENT_ANSWER = "李明：1.2 kg\n张华：-0.5kg\n刘伟：0kg\n李明和刘伟为非负数"
 
 
+def test_fill_blank_ignores_display_only_circled_answer_numbers():
+    """A reference's ①②③ labels must not change the mathematical value."""
+    reference = "①1.2 kg；②-0.5 kg；③0 kg"
+    answer = "1.2 kg；-0.5 kg；0 kg"
+
+    result = asyncio.run(grade_answer(
+        question_type="fill_blank",
+        student_answer=answer,
+        expected_answer=reference,
+    ))
+
+    assert result.is_correct is True
+    assert result.match_type == MatchType.NUMERIC_EQUIVALENT
+    assert grade_answer_deterministic(
+        question_type="fill_blank",
+        student_answer=answer,
+        expected_answer=reference,
+    ) is True
+
+
 def test_structured_word_problem_accepts_equivalent_labelled_answer():
     result = asyncio.run(grade_answer(
         question_type="free_response",

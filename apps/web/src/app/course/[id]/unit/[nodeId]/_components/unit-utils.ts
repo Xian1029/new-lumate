@@ -207,11 +207,11 @@ export type NextLearningAction = "review" | "targeted_practice" | "practice";
 /** One explicit recommendation prevents UI from independently guessing a CTA. */
 export function getNextLearningAction(input: {
   urgentReviewCount: number;
-  wrongAnswerCount: number;
+  activeWrongAnswerCount: number;
   errorTrend: ErrorTrendSummary;
 }): NextLearningAction {
   if (input.urgentReviewCount > 0) return "review";
-  if (input.wrongAnswerCount > 0 || input.errorTrend.recent7d > 0) return "targeted_practice";
+  if (input.activeWrongAnswerCount > 0) return "targeted_practice";
   return "practice";
 }
 

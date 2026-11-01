@@ -243,3 +243,23 @@ async def test_overall_progress_is_weighted_by_learning_items_not_space_average(
     assert summary["completed_learning_items"] == 1
     assert summary["total_learning_items"] == 4
     assert summary["progress_percent"] == 25
+
+
+@pytest.mark.asyncio
+async def test_reviewed_learning_item_counts_as_completed_on_home(session):
+    db, user, course, node = session
+    db.add(LearningProgress(
+        user_id=user.id,
+        course_id=course.id,
+        content_node_id=node.id,
+        status="reviewed",
+        mastery_score=0.65,
+    ))
+    await db.commit()
+
+    overview = await learning_home_overview(user=user, db=db)
+    space = overview["learning_spaces"][0]
+
+    assert space["completed_learning_items"] == 1
+    assert space["total_learning_items"] == 1
+    assert space["progress_percent"] == 100

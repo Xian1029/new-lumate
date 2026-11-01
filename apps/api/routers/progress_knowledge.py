@@ -18,6 +18,7 @@ from models.progress import LearningProgress
 from models.practice import PracticeProblem
 from models.user import User
 from services.auth.dependency import get_current_user
+from services.course_access import get_course_or_404
 from services.knowledge.graph import build_knowledge_graph
 
 logger = logging.getLogger(__name__)
@@ -482,7 +483,8 @@ async def get_learning_velocity(
     """Get learning velocity stats for a course."""
     from services.learning_science.velocity_tracker import compute_velocity
 
-    return await compute_velocity(db, course_id, window_days=window_days)
+    await get_course_or_404(db, course_id, user_id=user.id)
+    return await compute_velocity(db, course_id, user.id, window_days=window_days)
 
 
 @router.get("/courses/{course_id}/forecast", summary="Get completion forecast", description="Forecast course completion date based on current learning velocity.")
@@ -494,7 +496,8 @@ async def get_completion_forecast(
     """Forecast course completion date based on learning velocity."""
     from services.learning_science.completion_forecaster import forecast_completion
 
-    return await forecast_completion(db, course_id)
+    await get_course_or_404(db, course_id, user_id=user.id)
+    return await forecast_completion(db, course_id, user.id)
 
 
 @router.get("/transfer-opportunities", summary="Get transfer opportunities", description="Detect cross-course transfer learning opportunities.")

@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, useCallback, useMemo } from "react";
+import { lazy, useCallback, useMemo, useState } from "react";
 import { useT } from "@/lib/i18n-context";
 import { useWorkspaceStore } from "@/store/workspace";
 import { TabbedSection, type TabDef } from "./tabbed-section";
@@ -30,6 +30,27 @@ interface PracticeSectionProps {
 }
 
 type PracticeTab = "quiz" | "flashcards" | "review";
+type ReviewSource = "quiz" | "flashcards" | null;
+
+function ReviewSourcePicker({ onChoose }: { onChoose: (source: Exclude<ReviewSource, null>) => void }) {
+  const t = useT();
+  return (
+    <div className="flex flex-1 items-center justify-center p-6 text-center" data-testid="review-source-picker">
+      <div className="max-w-sm space-y-3">
+        <h3 className="text-sm font-semibold">{t("practice.review.chooseTitle")}</h3>
+        <p className="text-xs leading-5 text-muted-foreground">{t("practice.review.chooseHint")}</p>
+        <div className="flex flex-wrap justify-center gap-2">
+          <button type="button" className="rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted" onClick={() => onChoose("quiz")}>
+            {t("practice.review.quiz")}
+          </button>
+          <button type="button" className="rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted" onClick={() => onChoose("flashcards")}>
+            {t("practice.review.flashcards")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function PracticeSection({
   courseId,
@@ -43,6 +64,11 @@ export function PracticeSection({
   flashcardExitHref,
 }: PracticeSectionProps) {
   const t = useT();
+  // In a combined practice area, “复盘” must retain the tab the learner came
+  // from.  Scoped blocks already have an unambiguous source.
+  const [reviewSource, setReviewSource] = useState<ReviewSource>(
+    scope === "flashcards" ? "flashcards" : scope === "quiz" ? "quiz" : null,
+  );
   const allTabs: TabDef<PracticeTab>[] = useMemo(
     () => [
       { id: "quiz", label: t("course.quiz"), testId: "right-tab-quiz" },
@@ -72,6 +98,12 @@ export function PracticeSection({
       testId="practice-section"
       externalTab={practiceActiveTab}
       onExternalTabConsumed={clearPracticeTab}
+      onTabChange={(nextTab, previousTab) => {
+        if (nextTab === "review" && (previousTab === "quiz" || previousTab === "flashcards")) {
+          setReviewSource(previousTab);
+        }
+        if (nextTab === "quiz" || nextTab === "flashcards") setReviewSource(nextTab);
+      }}
     >
       {(activeTab) => (
         <>
@@ -87,11 +119,14 @@ export function PracticeSection({
           {activeTab === "flashcards" ? (
             <FlashcardView courseId={courseId} aiActionsEnabled={aiActionsEnabled} exitHref={flashcardExitHref} />
           ) : null}
-          {activeTab === "review" && showReview && scope !== "flashcards" ? (
+          {activeTab === "review" && showReview && reviewSource === "quiz" ? (
             <ReviewView courseId={courseId} aiActionsEnabled={aiActionsEnabled} />
           ) : null}
-          {activeTab === "review" && showReview && scope === "flashcards" ? (
+          {activeTab === "review" && showReview && reviewSource === "flashcards" ? (
             <FlashcardReviewView courseId={courseId} />
+          ) : null}
+          {activeTab === "review" && showReview && reviewSource === null ? (
+            <ReviewSourcePicker onChoose={setReviewSource} />
           ) : null}
         </>
       )}

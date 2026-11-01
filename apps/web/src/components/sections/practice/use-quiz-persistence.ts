@@ -106,6 +106,8 @@ export function useQuizPersistence(courseId: string, scopeId?: string | null) {
 export interface FlashcardSessionState {
   index: number;
   reviewedCount: number;
+  /** Whether the current card is showing its answer. Shared by compact and full-page views. */
+  flipped?: boolean;
   cards?: unknown[];
   savedAt: number;
 }

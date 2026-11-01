@@ -3,7 +3,7 @@
 import { t, tf } from "@/lib/i18n";
 import { useEffect, useState } from "react";
 import { TrendingUp, BarChart3 } from "lucide-react";
-import { getForgettingForecast, getCourseProgress } from "@/lib/api";
+import { getForgettingForecast, getCourseProgress, type CourseProgress } from "@/lib/api";
 import type { BlockComponentProps } from "@/lib/block-system/registry";
 import { useWorkspaceStore } from "@/store/workspace";
 
@@ -30,7 +30,7 @@ interface ForecastData {
 
 export default function ForecastBlock({ courseId }: BlockComponentProps) {
   const [data, setData] = useState<ForecastData | null>(null);
-  const [progress, setProgress] = useState<{ mastery_pct?: number; total_concepts?: number } | null>(null);
+  const [progress, setProgress] = useState<CourseProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const analyticsRefreshKey = useWorkspaceStore((state) => state.sectionRefreshKey.analytics);
 
@@ -43,7 +43,7 @@ export default function ForecastBlock({ courseId }: BlockComponentProps) {
           if (!cancelled) setData(d as ForecastData);
         }),
         getCourseProgress(courseId).then((p) => {
-          if (!cancelled) setProgress(p as { mastery_pct?: number; total_concepts?: number });
+          if (!cancelled) setProgress(p);
         }),
       ]).finally(() => {
         if (!cancelled) setLoading(false);
@@ -68,15 +68,22 @@ export default function ForecastBlock({ courseId }: BlockComponentProps) {
   const warningCount = data?.warning_count ?? 0;
   const predictions = data?.predictions ?? [];
   const okCount = totalItems - urgentCount - warningCount;
-  const masteryPct = totalItems > 0 ? Math.round((okCount / totalItems) * 100) : (progress?.mastery_pct ?? 0);
+  // The main percentage is course completion, exactly the same contract used
+  // in the course-progress panel and home cards.  Retrievability is a
+  // separate, time-sensitive review signal; presenting it as completion made
+  // the two percentages disagree even when both APIs were correct.
+  const learningProgress = progress?.learning_progress;
+  const completedItems = learningProgress?.completed_learning_items ?? 0;
+  const totalLearningItems = learningProgress?.total_learning_items ?? 0;
+  const completionPct = learningProgress?.progress_percent ?? progress?.completion_percent ?? 0;
 
   const riskPredictions = predictions.filter(
     (p) => p.urgency === "overdue" || p.urgency === "urgent" || p.urgency === "warning",
   );
 
   const readinessColor =
-    masteryPct >= 80 ? "text-success" :
-    masteryPct >= 50 ? "text-warning" :
+    completionPct >= 80 ? "text-success" :
+    completionPct >= 50 ? "text-warning" :
     "text-destructive";
 
   const summaryKey = totalItems === 0
@@ -100,10 +107,10 @@ export default function ForecastBlock({ courseId }: BlockComponentProps) {
         </div>
         <div>
           <p className="text-2xl font-bold text-foreground tabular-nums">
-            <span className={readinessColor}>{Math.round(masteryPct)}%</span>
+            <span className={readinessColor}>{Math.round(completionPct)}%</span>
           </p>
           <p className="text-xs text-muted-foreground">
-            {t("forecast.memoryScore")} · {tf("forecast.rememberedCount", { count: okCount, total: totalItems })}
+            {t("progress.completion")} · {tf("forecast.completedItems", { count: completedItems, total: totalLearningItems })}
           </p>
         </div>
       </div>
@@ -132,14 +139,14 @@ export default function ForecastBlock({ courseId }: BlockComponentProps) {
       {/* Progress bar */}
       <div
         role="progressbar"
-        aria-label={tf("forecast.memoryScoreAria", { percent: Math.round(masteryPct) })}
+        aria-label={tf("forecast.completionAria", { percent: Math.round(completionPct) })}
         className="w-full h-2 bg-muted/40 rounded-full overflow-hidden"
       >
         <div
           className={`h-full rounded-full transition-all duration-500 ${
-            masteryPct >= 80 ? "bg-success" : masteryPct >= 50 ? "bg-warning" : "bg-destructive"
+            completionPct >= 80 ? "bg-success" : completionPct >= 50 ? "bg-warning" : "bg-destructive"
           }`}
-          style={{ width: `${Math.min(100, masteryPct)}%` }}
+          style={{ width: `${Math.min(100, completionPct)}%` }}
           aria-hidden="true"
         />
       </div>

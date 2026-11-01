@@ -2,8 +2,11 @@
 
 import { t } from "@/lib/i18n";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { getMisconceptionDashboard, type MisconceptionDashboard, type MisconceptionItem } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ArrowRight } from "lucide-react";
 
 interface MisconceptionViewProps {
   courseId: string;
@@ -48,7 +51,7 @@ function ResolutionBar({ resolved, total, status }: { resolved: number; total: n
   );
 }
 
-function MisconceptionCard({ item, rank }: { item: MisconceptionItem; rank: number }) {
+function MisconceptionCard({ item, rank, onReview }: { item: MisconceptionItem; rank: number; onReview: () => void }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -124,11 +127,20 @@ function MisconceptionCard({ item, rank }: { item: MisconceptionItem; rank: numb
           ))}
         </div>
       ) : null}
+
+      {item.status !== "resolved" ? (
+        <div className="pt-1" onClick={(event) => event.stopPropagation()}>
+          <Button size="sm" variant="outline" onClick={onReview} className="h-8 rounded-full">
+            去错题复盘 <ArrowRight className="size-3.5" />
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 export function MisconceptionView({ courseId }: MisconceptionViewProps) {
+  const router = useRouter();
   const [data, setData] = useState<MisconceptionDashboard | null>(null);
   const [error, setError] = useState(false);
 
@@ -238,7 +250,12 @@ export function MisconceptionView({ courseId }: MisconceptionViewProps) {
       {/* Misconception cards */}
       <div className="space-y-2">
         {misconceptions.map((item, i) => (
-          <MisconceptionCard key={item.concept} item={item} rank={i + 1} />
+          <MisconceptionCard
+            key={item.concept}
+            item={item}
+            rank={i + 1}
+            onReview={() => router.push(`/course/${courseId}/wrong-answers`)}
+          />
         ))}
       </div>
     </div>

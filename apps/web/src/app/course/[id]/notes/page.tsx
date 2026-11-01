@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCourseStore } from "@/store/course";
 import { useWorkspaceStore } from "@/store/workspace";
 import { WorkspaceHeader } from "@/components/shell/workspace-header";
@@ -14,6 +14,7 @@ import { ttlCache } from "@/lib/cache";
 
 export default function NotesPage() {
   const params = useParams();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const courseId = params.id as string;
   const [chatOpen, setChatOpen] = useState(false);
@@ -55,7 +56,23 @@ export default function NotesPage() {
     <div className="min-h-screen bg-background flex flex-col">
       <WorkspaceHeader courseName={course?.name || "Notes"} courseId={courseId} />
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-6">
-        <NotesSection courseId={courseId} aiActionsEnabled={aiActionsEnabled} />
+        <NotesSection
+          courseId={courseId}
+          aiActionsEnabled={aiActionsEnabled}
+          initialFileJobId={searchParams.get("reader")}
+          initialPage={Number(searchParams.get("page")) || 1}
+          onCloseReader={() => {
+            const returnNodeId = searchParams.get("node");
+            if (searchParams.get("from") === "unit" && returnNodeId) {
+              router.push(`/course/${courseId}/unit/${encodeURIComponent(returnNodeId)}#unit-notes`);
+            } else if (searchParams.has("reader")) {
+              const next = new URLSearchParams(searchParams.toString());
+              next.delete("reader");
+              next.delete("page");
+              router.replace(`/course/${courseId}/notes${next.size ? `?${next}` : ""}`);
+            }
+          }}
+        />
       </main>
       <ChatFab open={chatOpen} onToggle={() => setChatOpen((v) => !v)} />
       <ChatDrawer courseId={courseId} open={chatOpen} aiActionsEnabled={aiActionsEnabled} />

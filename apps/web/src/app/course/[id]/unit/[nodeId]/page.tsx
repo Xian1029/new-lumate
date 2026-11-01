@@ -109,7 +109,7 @@ export default function UnitPage() {
         <ErrorBoundary section="error analysis">
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <ErrorPatternSection wrongAnswers={wrongAnswers} errorPatterns={errorPatterns} t={t} />
-            <NextActionsSection courseId={courseId} masterySummary={masterySummary} errorTrend={errorTrend} difficultyRec={difficultyRec} quizModeHint={quizModeHint} aiActionsEnabled={aiActionsEnabled} generatingFocusedQuiz={generatingFocusedQuiz} onGenerateFocusedQuiz={() => void handleGenerateFocusedQuiz()} onNavigate={(path) => router.push(path)} t={t} tf={tf} />
+            <NextActionsSection courseId={courseId} masterySummary={masterySummary} activeWrongAnswerCount={wrongAnswers.length} errorTrend={errorTrend} difficultyRec={difficultyRec} quizModeHint={quizModeHint} aiActionsEnabled={aiActionsEnabled} generatingFocusedQuiz={generatingFocusedQuiz} onGenerateFocusedQuiz={() => void handleGenerateFocusedQuiz()} onNavigate={(path) => router.push(path)} t={t} tf={tf} />
           </section>
         </ErrorBoundary>
 

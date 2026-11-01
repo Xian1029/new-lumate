@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { useWorkspaceStore } from "@/store/workspace";
 import { WorkspaceHeader } from "@/components/shell/workspace-header";
@@ -26,6 +26,7 @@ import { SyncSettingsPanel } from "@/components/course/sync-settings-panel";
 import { EmptyMaterialsPrompt } from "@/components/course/empty-materials-prompt";
 import { findNodeById, isLearnableContentNode } from "@/lib/content-tree";
 import { CoursePlanStatus } from "@/components/learning-plans/course-plan-status";
+import { buildLayoutFromMode } from "@/lib/block-system/templates";
 
 type ResumeContext = {
   contentNodeId: string | null;
@@ -49,8 +50,11 @@ export default function CoursePage() {
   const { health, course, courses, contentTree, aiActionsEnabled } = useCourseData(courseId);
   const { blocks, blocksInitialized } = useBlockPersistence(courseId, course);
   const applyBlockTemplate = useWorkspaceStore((s) => s.applyBlockTemplate);
+  const resetLayout = useWorkspaceStore((s) => s.resetLayout);
+  const guidedRecoveryRef = useRef<string | null>(null);
   const requestedNodeId = searchParams.get("node");
   const requestedModule = searchParams.get("module");
+  const isGuidedPlanSession = searchParams.get("guided") === "1";
 
   useEffect(() => {
     const key = `lumate:last-learning:${courseId}`;
@@ -88,6 +92,26 @@ export default function CoursePage() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [blocks, blocksInitialized, contentTree, requestedModule, requestedNodeId, resumeContext, setNotesDrawerOpen, setSelectedNodeId]);
+
+  useEffect(() => {
+    if (!isGuidedPlanSession || !blocksInitialized || guidedRecoveryRef.current === courseId) return;
+    const visibleTypes = new Set(
+      blocks
+        .filter((block) => block.isVisible ?? block.visible ?? true)
+        .map((block) => block.type),
+    );
+    const hasLearningFlow = (["chapter_list", "progress", "quiz", "flashcards", "knowledge_graph"] as const)
+      .some((type) => visibleTypes.has(type));
+    if (hasLearningFlow) return;
+
+    // A legacy notes-only layout cannot execute a content task.  Recover the
+    // standard course-following workspace only for an explicit plan session;
+    // this applies to every task module. A NOTE/PRACTICE plan task used to
+    // bypass the recovery and open an old notes-only layout.
+    // Regular visits and valid custom layouts remain untouched.
+    guidedRecoveryRef.current = courseId;
+    resetLayout(buildLayoutFromMode("course_following"));
+  }, [blocks, blocksInitialized, courseId, isGuidedPlanSession, resetLayout]);
 
   const handleIngestionComplete = useCallback(() => {
     const store = useWorkspaceStore.getState();

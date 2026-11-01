@@ -90,8 +90,12 @@ export function useUnitData(courseId: string, nodeId: string) {
           setWrongAnswers([]);
           return;
         }
-        setTrendBaseAnswers(items);
-        setWrongAnswers(items.slice(0, 12));
+        // Every current-action indicator describes unresolved work. Resolved
+        // history remains in the wrong-answer book but cannot keep this
+        // chapter marked weak.
+        const activeItems = items.filter((item) => !item.mastered);
+        setTrendBaseAnswers(activeItems);
+        setWrongAnswers(activeItems.slice(0, 12));
       })
       .catch((e) => {
         console.error("[Unit] wrong answers fetch failed:", e);
@@ -102,7 +106,11 @@ export function useUnitData(courseId: string, nodeId: string) {
     getReviewSession(courseId, 30)
       .then((session) => {
         const allItems = session?.items ?? [];
-        const filtered = allItems.filter((item) => item.content_node_id === nodeId || matchesFocus(item.concept_label, focusTerms));
+        const filtered = allItems.filter((item) => (
+          item.content_node_id
+            ? item.content_node_id === nodeId
+            : matchesFocus(item.concept_label, focusTerms)
+        ));
         setReviewItems(filtered.slice(0, 12));
       })
       .catch((e) => {

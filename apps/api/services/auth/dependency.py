@@ -5,6 +5,8 @@ When AUTH_ENABLED=true, requires a valid JWT bearer token.
 """
 
 import uuid
+import hashlib
+from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -68,22 +70,30 @@ async def get_current_user(
             detail="AUTH_ENABLED must be true when DEPLOYMENT_MODE is multi_user",
         )
 
-    if not credentials:
+    cookie_session = request.cookies.get("lumate_session") if request is not None else None
+    if not cookie_session and not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    from services.auth.jwt import decode_token
     try:
-        payload = decode_token(credentials.credentials)
-        if payload.get("type") != "access":
-            raise HTTPException(status_code=401, detail="Invalid token type")
-        user_id = uuid.UUID(payload["sub"])
-    except HTTPException:
-        raise  # Re-raise specific HTTP errors (e.g. "Invalid token type") as-is
-    except (ValueError, KeyError) as e:
+        if cookie_session:
+            from models.user import UserSession
+            digest = hashlib.sha256(cookie_session.encode()).hexdigest()
+            session = (await _execute_user_query(db, select(UserSession).where(UserSession.id == digest))).scalar_one_or_none()
+            if not session or session.expires_at <= datetime.now(timezone.utc):
+                raise ValueError("expired session")
+            user_id = session.user_id
+        else:
+            # Temporary API compatibility for existing clients during rollout.
+            from services.auth.jwt import decode_token
+            payload = decode_token(credentials.credentials)
+            if payload.get("type") != "access":
+                raise ValueError("invalid token type")
+            user_id = uuid.UUID(payload["sub"])
+    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
@@ -97,4 +107,11 @@ async def get_current_user(
     if request is not None:
         request.state.user_id = str(user.id)
         request.state.deployment_mode = settings.deployment_mode
+    return user
+
+
+async def require_super_admin(user: User = Depends(get_current_user)) -> User:
+    """Server-side role guard; UI visibility is never an authorization check."""
+    if user.role != "super_admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅管理员可访问")
     return user

@@ -203,6 +203,7 @@ async def regenerate_plan_tasks(
                 course_id=plan.course_id,
                 content_node_id=node_id,
                 node_exists=node is not None,
+                guided_session=True,
             ),
             scheduled_for=scheduled,
             estimated_minutes=minutes,

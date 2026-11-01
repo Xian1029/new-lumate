@@ -296,7 +296,7 @@ export function GraphView({ courseId, focusTerms, activeMaterialId }: GraphViewP
   return (
     <div role="region" aria-label={t("ui.knowledge_graph")} className="flex h-full min-h-0 flex-col overflow-hidden bg-[#f7f8f6]" data-testid="graph-panel">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-4 py-3">
-        <div><p className="text-xs font-semibold text-brand">知识图谱</p><p className="text-sm font-medium">完整知识点关系</p></div>
+        <p className="text-sm font-semibold text-brand">知识图谱</p>
         <div className="inline-flex rounded-xl bg-muted p-1" role="tablist" aria-label="知识图谱视图">
           <button type="button" role="tab" aria-selected={false} onClick={() => setView("path")} className="rounded-lg px-3 py-2 text-sm text-muted-foreground hover:text-foreground">推荐学习路径</button>
           <button type="button" role="tab" aria-selected className="rounded-lg bg-card px-3 py-2 text-sm font-semibold shadow-sm">完整知识图谱</button>
@@ -377,7 +377,10 @@ export function GraphView({ courseId, focusTerms, activeMaterialId }: GraphViewP
           });
           const isSelected = selected?.id === node.id || matchesCurrentNote;
           const isCurrentMaterial = Boolean(activeMaterialId && node.material_id === activeMaterialId);
-          const isMastered = node.mastery >= 0.85;
+          // Keep the graph label aligned with the server-side learning-path
+          // and progress threshold.  85% remains reserved for prerequisite
+          // consolidation, not the learner-facing "已掌握" state.
+          const isMastered = node.mastery >= 0.8;
           const isLearning = node.mastery > 0 && !isMastered;
           const background = isMastered ? "#f4f8f5" : isLearning ? "#fbfaf5" : "#ffffff";
           const accent = isMastered ? "#66806d" : isLearning ? "#8d9278" : "#8b9aa3";

@@ -66,6 +66,17 @@ def test_deep_links_per_module():
         assert href == expected, task_type
 
 
+def test_guided_learning_task_marks_its_workspace_session():
+    href = build_action_href(
+        task_type="LEARN",
+        course_id=CID,
+        content_node_id=NID,
+        node_exists=True,
+        guided_session=True,
+    )
+    assert href == f"/course/{CID}?node={NID}&module=CONTENT&guided=1"
+
+
 def test_deleted_node_falls_back_never_404():
     assert build_action_href(task_type="LEARN", course_id=CID, content_node_id=NID, node_exists=False) == f"/course/{CID}?module=CONTENT"
     assert build_action_href(task_type="NOTE", course_id=CID, content_node_id=NID, node_exists=False) == f"/course/{CID}?module=NOTE"
@@ -77,6 +88,14 @@ def test_node_less_task_still_deep_links_to_module():
     # on a generic page.
     assert build_action_href(task_type="NOTE", course_id=CID, content_node_id=None, node_exists=False) == f"/course/{CID}?module=NOTE"
     assert build_action_href(task_type="REVIEW", course_id=CID, content_node_id=None, node_exists=False) == f"/course/{CID}?module=REVIEW"
+
+
+def test_node_less_guided_task_keeps_workspace_context():
+    """Plan tasks without a resolved section must not fall into legacy pages."""
+    assert build_action_href(
+        task_type="NOTE", course_id=CID, content_node_id=None,
+        node_exists=False, guided_session=True,
+    ) == f"/course/{CID}?module=NOTE&guided=1"
 
 
 def test_cta_labels_align_with_module():

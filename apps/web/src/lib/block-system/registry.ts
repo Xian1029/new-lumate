@@ -125,5 +125,5 @@ export const USER_ADDABLE_BLOCKS: BlockType[] = [
   // Practice is a core capability: users may not remove the protected default
   // cards, but must be able to restore a missing quiz or flashcard entry.
   "notes", "quiz", "flashcards", "review", "plan",
-  "knowledge_graph", "progress", "wrong_answers", "forecast", "summary", "agent_insight",
+  "progress", "wrong_answers", "forecast", "summary", "agent_insight",
 ];

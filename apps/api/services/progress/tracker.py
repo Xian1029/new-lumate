@@ -88,6 +88,31 @@ async def update_study_time(
     return progress
 
 
+async def record_flashcard_review(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    course_id: uuid.UUID,
+    content_node_id: uuid.UUID | None,
+    *,
+    recalled: bool,
+) -> LearningProgress:
+    """Record a confirmed flashcard review in the canonical content progress.
+
+    Flashcards are not just a UI interaction: a confirmed review means the
+    linked learning content has been revisited.  This is the source used by
+    the home progress cards and content-progress graph, so keep the update in
+    the same domain service as quiz progress.
+    """
+    progress = await get_or_create_progress(db, user_id, course_id, content_node_id)
+    progress.review_count += 1
+    progress.last_studied_at = _utcnow()
+    if recalled:
+        _apply_fsrs_review(progress, True)
+        if progress.status != "mastered":
+            progress.status = "reviewed"
+    return progress
+
+
 async def update_quiz_result(
     db: AsyncSession,
     user_id: uuid.UUID,

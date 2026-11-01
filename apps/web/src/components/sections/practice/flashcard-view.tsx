@@ -101,10 +101,11 @@ export function FlashcardView({
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [reviewed, setReviewed] = useState(0);
-  const [dueCount, setDueCount] = useState(0);
+  const [courseDueCount, setCourseDueCount] = useState(0);
   const [useLector, setUseLector] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const restoredRef = useRef(false);
+  const freshSessionRequestedRef = useRef(false);
   const ratingLockRef = useRef(false);
   const { save, load, subscribe } = useFlashcardPersistence(courseId, selectedNodeId);
 
@@ -114,6 +115,7 @@ export function FlashcardView({
     setIndex(0);
     setReviewed(0);
     setFlipped(false);
+    freshSessionRequestedRef.current = false;
   }, [selectedNodeId]);
 
   useEffect(() => {
@@ -121,7 +123,7 @@ export function FlashcardView({
 
     if (!selectedNodeId) {
       setCards([]);
-      setDueCount(0);
+      setCourseDueCount(0);
       setLoadError(null);
       setLoading(false);
       return () => {
@@ -131,13 +133,12 @@ export function FlashcardView({
 
     (async () => {
       // Helper to apply loaded cards + session restore in one place
-      const applyCards = (cards: (Flashcard | LectorFlashcard)[], dueCount: number, isLector: boolean) => {
+      const applyCards = async (cards: (Flashcard | LectorFlashcard)[], isLector: boolean) => {
         if (cancelled) return;
         let usableCards = uniqueFlashcards(cards.filter((card) =>
           isUsableFlashcard(card, locale) &&
           (!selectedNodeId || card.content_node_id === selectedNodeId),
         ));
-        setDueCount(dueCount);
         setUseLector(isLector);
         // Restore session from localStorage (only once per mount)
         if (!restoredRef.current) {
@@ -149,37 +150,89 @@ export function FlashcardView({
             );
           }
           setCards(usableCards);
-          if (saved && saved.index < usableCards.length) {
-            setIndex(saved.index);
+          if (saved && saved.index <= usableCards.length) {
+            const savedIndex = Math.max(0, Math.min(saved.index, usableCards.length));
+            setIndex(savedIndex);
             setReviewed(saved.reviewedCount);
+            // A completed session intentionally restores its completion state;
+            // only an in-progress card can remain flipped to its answer.
+            setFlipped(savedIndex < usableCards.length && Boolean(saved.flipped));
           } else {
             setIndex(0);
             setReviewed(0);
+            setFlipped(false);
           }
-        } else setCards(usableCards);
-        setFlipped(false);
+
+          const completedSavedSession = saved !== null
+            && Boolean(saved.cards?.length)
+            && saved.index >= usableCards.length;
+          if (completedSavedSession && aiActionsEnabled && !freshSessionRequestedRef.current) {
+            // A completed set has no resume path.  Prepare a fresh set from the
+            // same lesson, explicitly excluding every front the learner just saw.
+            freshSessionRequestedRef.current = true;
+            try {
+              const mode = useWorkspaceStore.getState().spaceLayout.mode ?? undefined;
+              const generated = await generateFlashcards(
+                courseId,
+                Math.max(usableCards.length, 5),
+                mode,
+                usableCards.map((card) => card.front),
+                selectedNodeId,
+              );
+              if (cancelled) return;
+              const seenFronts = new Set(usableCards.map((card) => flashcardFrontKey(card.front)));
+              const freshCards = uniqueFlashcards(generated.cards.filter((card) =>
+                isUsableFlashcard(card, locale)
+                && !seenFronts.has(flashcardFrontKey(card.front)),
+              ));
+              if (freshCards.length) {
+                setCards(freshCards);
+                setIndex(0);
+                setReviewed(0);
+                setFlipped(false);
+                save({ index: 0, reviewedCount: 0, flipped: false, cards: freshCards });
+                toast.success(`已准备 ${freshCards.length} 张不重复的新闪卡`);
+              } else {
+                toast.warning("上一组闪卡已完成，暂时没有生成出不重复的新卡");
+              }
+            } catch {
+              toast.warning("上一组闪卡已完成，暂时无法生成新卡，请稍后重试");
+            }
+          }
+        } else {
+          setCards(usableCards);
+          setFlipped(false);
+        }
       };
 
       try {
+        // Keep the course-wide “today due” count independent from the cards
+        // displayed for the selected lesson.  A learner may be studying
+        // lesson A while 15 cards from other lessons are due; those cards
+        // must open the card-review queue, never be labelled as an empty A.
+        const duePromise = getDueFlashcards(courseId);
         // Try LECTOR-ordered cards first for semantically-aware review
         const lector = await getLectorOrderedFlashcards(courseId);
         if (cancelled) return;
+        const due = await duePromise;
+        if (cancelled) return;
+        setCourseDueCount(due.due_count);
         if (lector.cards.length > 0) {
-          applyCards(lector.cards, lector.count, true);
+          await applyCards(lector.cards, true);
         } else {
           // Fall back to regular FSRS due cards
-          const due = await getDueFlashcards(courseId);
-          applyCards(due.cards, due.due_count, false);
+          await applyCards(due.cards, false);
         }
       } catch {
         // Fall back to regular due cards on any error
         try {
           const due = await getDueFlashcards(courseId);
-          applyCards(due.cards, due.due_count, false);
+          setCourseDueCount(due.due_count);
+          await applyCards(due.cards, false);
         } catch {
           if (!cancelled) {
             setCards([]);
-            setDueCount(0);
+            setCourseDueCount(0);
             setLoadError(loadFailedLabel);
           }
         }
@@ -202,7 +255,7 @@ export function FlashcardView({
     }
     setIndex(saved.index);
     setReviewed(saved.reviewedCount);
-    setFlipped(false);
+    setFlipped(Boolean(saved.flipped));
   }), [subscribe]);
 
   const handleGenerate = useCallback(async () => {
@@ -320,8 +373,13 @@ export function FlashcardView({
   }, [cards, courseId, loading, locale, save, submitting]);
 
   const handleFlip = useCallback(() => {
-    if (!submitting) setFlipped((value) => !value);
-  }, [submitting]);
+    if (submitting) return;
+    setFlipped((value) => {
+      const nextValue = !value;
+      save({ index, reviewedCount: reviewed, flipped: nextValue, cards });
+      return nextValue;
+    });
+  }, [cards, index, reviewed, save, submitting]);
 
   const handleRate = useCallback(
     async (value: number) => {
@@ -342,7 +400,7 @@ export function FlashcardView({
       const newIndex = index + 1;
       setReviewed(newReviewed);
       setIndex(newIndex);
-      save({ index: newIndex, reviewedCount: newReviewed, cards });
+      save({ index: newIndex, reviewedCount: newReviewed, flipped: false, cards });
       ratingLockRef.current = false;
     },
     [cards, index, reviewed, submitting, reviewFailedLabel, save],
@@ -391,10 +449,14 @@ export function FlashcardView({
   if (cards.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-        {dueCount > 0 ? (
-          <Badge variant="destructive" className="mb-3">
-            {t("flashcard.cardsDueToday").replace("{count}", String(dueCount))}
-          </Badge>
+        {courseDueCount > 0 ? (
+          <Link
+            href={`/course/${courseId}/practice?tab=review&scope=flashcards`}
+            className="mb-3 inline-flex rounded-full bg-destructive px-3 py-1 text-xs font-medium text-destructive-foreground transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+            aria-label={t("flashcard.cardsDueToday").replace("{count}", String(courseDueCount))}
+          >
+            {t("flashcard.cardsDueToday").replace("{count}", String(courseDueCount))}
+          </Link>
         ) : null}
         <h3 className="text-sm font-medium mb-1">{t("flashcard.title")}</h3>
         {loadError ? (
@@ -474,6 +536,14 @@ export function FlashcardView({
             />
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          {courseDueCount > 0 ? (
+            <Link
+              href={`/course/${courseId}/practice?tab=review&scope=flashcards`}
+              className="inline-flex rounded-full bg-destructive px-2.5 py-1 text-[11px] font-medium text-destructive-foreground transition-opacity hover:opacity-85"
+            >
+              {t("flashcard.cardsDueToday").replace("{count}", String(courseDueCount))}
+            </Link>
+          ) : null}
           {useLector && (card as LectorFlashcard).lector_reason && (card as LectorFlashcard).lector_reason !== "due" ? (
             <Badge variant="secondary" className="h-auto min-w-0 whitespace-normal py-1 font-normal text-[11px] leading-4 text-muted-foreground">
               {translateLectorReason((card as LectorFlashcard).lector_reason!)}

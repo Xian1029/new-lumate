@@ -80,27 +80,11 @@ async def review_flashcard_endpoint(
 
     updated_card = review_flashcard(body.card, body.rating)
 
-    # Backfill concept metadata for cards created before graph linkage existed.
-    course_id = updated_card.get("course_id")
-    concept_names = updated_card.get("knowledge_points") or updated_card.get("concepts") or []
-    if isinstance(concept_names, str):
-        concept_names = [concept_names]
-    if not concept_names and course_id:
-        from models.knowledge_graph import KnowledgeNode
-
-        cid = uuid.UUID(course_id) if isinstance(course_id, str) else course_id
-        node_result = await db.execute(
-            select(KnowledgeNode).where(KnowledgeNode.course_id == cid)
-        )
-        visible_text = f"{updated_card.get('front', '')} {updated_card.get('back', '')}".lower()
-        matches = sorted(
-            (node.name for node in node_result.scalars().all() if node.name.lower() in visible_text),
-            key=len,
-            reverse=True,
-        )[:5]
-        if matches:
-            concept_names = matches
-            updated_card["knowledge_points"] = matches
+    # The persisted asset is authoritative for course/node linkage.  This
+    # keeps older card batches (which may not contain metadata on every card)
+    # connected to progress and the knowledge graph after a review.
+    resolved_course_id = updated_card.get("course_id")
+    resolved_content_node_id = updated_card.get("content_node_id")
 
     # Persist FSRS state back to the GeneratedAsset in the database.
     # Note: read-modify-write on JSON column without row-level locking.
@@ -120,8 +104,15 @@ async def review_flashcard_endpoint(
         if asset and asset.content:
             cards = asset.content.get("cards", [])
             if 0 <= body.card_index < len(cards):
+                stored_card = cards[body.card_index]
+                resolved_course_id = resolved_course_id or asset.course_id
+                resolved_content_node_id = resolved_content_node_id or stored_card.get("content_node_id")
+                if resolved_course_id:
+                    updated_card["course_id"] = str(resolved_course_id)
+                if resolved_content_node_id:
+                    updated_card["content_node_id"] = str(resolved_content_node_id)
                 cards[body.card_index] = {
-                    **cards[body.card_index],
+                    **stored_card,
                     "fsrs": updated_card.get("fsrs", {}),
                     "knowledge_points": updated_card.get("knowledge_points", []),
                 }
@@ -132,40 +123,32 @@ async def review_flashcard_endpoint(
     try:
         from services.analytics.events import emit_flashcard_reviewed
         card_id = body.card.get("id") or body.card.get("front", "unknown")[:40]
-        course_id = body.card.get("course_id")
-        if course_id:
+        if resolved_course_id:
             await emit_flashcard_reviewed(
                 db,
                 user_id=user.id,
-                course_id=uuid.UUID(course_id) if isinstance(course_id, str) else course_id,
+                course_id=uuid.UUID(str(resolved_course_id)),
                 card_id=str(card_id),
                 rating=body.rating,
             )
     except (SQLAlchemyError, ValueError, TypeError):
         logger.exception("Flashcard learning event emission failed (best-effort)")
 
-    # Sync flashcard review to LOOM concept mastery (bridges flashcard ↔ knowledge graph)
-    if concept_names and course_id:
+    # Flashcards record recall and drive spaced repetition only. They are not
+    # treated as solved exercises: one "Good" click must not mark a graph
+    # concept as mastered. Knowledge mastery comes from confirmed practice.
+    # Record the confirmed review even when the card has no graph concept.
+    if resolved_course_id:
         try:
-            from services.loom_mastery import update_concept_mastery
-            is_correct = body.rating >= 3  # Good or Easy = correct recall
-            cid = uuid.UUID(course_id) if isinstance(course_id, str) else course_id
-            raw_content_node_id = updated_card.get("content_node_id")
-            linked_content_node_id = (
-                uuid.UUID(raw_content_node_id)
-                if isinstance(raw_content_node_id, str) and raw_content_node_id
-                else raw_content_node_id
+            from services.progress.tracker import record_flashcard_review
+            cid = uuid.UUID(str(resolved_course_id))
+            raw_content_node_id = resolved_content_node_id
+            node_id = uuid.UUID(str(raw_content_node_id)) if raw_content_node_id else None
+            await record_flashcard_review(
+                db, user.id, cid, node_id, recalled=body.rating >= 3,
             )
-            for concept in concept_names[:5]:  # Cap to avoid excessive DB ops
-                await update_concept_mastery(
-                    db, user.id, str(concept), cid,
-                    correct=is_correct, question_type="free_response",
-                    content_node_id=linked_content_node_id,
-                )
-        except ImportError:
-            logger.warning("Flashcard → LOOM mastery sync failed: services.loom_mastery not found")
         except (SQLAlchemyError, ValueError, KeyError):
-            logger.debug("Flashcard → LOOM mastery sync failed (best-effort)")
+            logger.debug("Flashcard → learning progress sync failed (best-effort)")
 
     # Single commit covers FSRS persistence, analytics event, and mastery sync
     await db.commit()
@@ -342,21 +325,9 @@ async def get_due_flashcards(
     for batch in batches:
         cards = (batch.content or {}).get("cards", [])
         for card_index, card in enumerate(cards):
-            fsrs = card.get("fsrs")
-            if not fsrs:
-                # New card — always due
+            from services.spaced_repetition.flashcards import is_flashcard_due
+            if is_flashcard_due(card, now):
                 due_cards.append({**card, "batch_id": str(batch.batch_id), "card_index": card_index})
-            else:
-                due_str = fsrs.get("due")
-                if due_str:
-                    try:
-                        due_dt = datetime.fromisoformat(due_str.replace("Z", "+00:00"))
-                        if due_dt <= now:
-                            due_cards.append({**card, "batch_id": str(batch.batch_id), "card_index": card_index})
-                    except (ValueError, TypeError):
-                        due_cards.append({**card, "batch_id": str(batch.batch_id), "card_index": card_index})
-                else:
-                    due_cards.append({**card, "batch_id": str(batch.batch_id), "card_index": card_index})
 
     # Adjust card order based on cognitive load (easier cards first when loaded)
     try:

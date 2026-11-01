@@ -53,12 +53,12 @@ async def _get_failed_file_replacement_target(
     user_id: uuid.UUID,
     course_id: uuid.UUID,
 ) -> IngestionJob | None:
-    """Return a failed file job explicitly selected for replacement.
+    """Return a failed or partially parsed file job explicitly selected for replacement.
 
     A replacement is deliberately explicit: uploading an unrelated file with
     the same filename must never remove a historical failure.  The caller only
     receives a target after proving that it belongs to the current user and
-    learning space and is still a failed file ingestion.
+    learning space and is either failed or has unreadable PDF pages.
     """
     if not target_id:
         return None
@@ -74,11 +74,11 @@ async def _get_failed_file_replacement_target(
             IngestionJob.user_id == user_id,
             IngestionJob.course_id == course_id,
             IngestionJob.source_type == "file",
-            IngestionJob.status == "failed",
         )
     )
     failed_job = result.scalar_one_or_none()
-    if not failed_job:
+    has_partial_pages = bool((failed_job.page_stats or {}).get("failed_pages")) if failed_job else False
+    if not failed_job or (failed_job.status != "failed" and not has_partial_pages):
         raise ValidationError("这条失败资料已不存在，或不属于当前学习空间")
     return failed_job
 

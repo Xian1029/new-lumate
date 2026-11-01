@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { RotateCcw } from "lucide-react";
+import { CheckCircle2, RotateCcw } from "lucide-react";
 import { useT } from "@/lib/i18n-context";
-import { getDueFlashcards, type Flashcard } from "@/lib/api";
+import { getDueFlashcards, reviewFlashcard, type Flashcard } from "@/lib/api";
+import { LEARNING_HOME_INVALIDATION_EVENT } from "@/lib/api/client";
+import { useWorkspaceStore } from "@/store/workspace";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SkeletonText } from "@/components/ui/skeleton";
@@ -19,12 +21,19 @@ function practiceHistoryLabel(count: number, t: (key: string) => string): string
   return t("flashcard.review.veryFamiliar").replace("{count}", String(count));
 }
 
+function reviewCardKey(card: Flashcard, index: number): string {
+  return `${card.batch_id ?? "batch"}:${card.card_index ?? index}:${card.id ?? card.front}`;
+}
+
 export function FlashcardReviewView({ courseId }: FlashcardReviewViewProps) {
   const t = useT();
   const [cards, setCards] = useState<Flashcard[]>([]);
   const [dueCount, setDueCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [confirmingCardKey, setConfirmingCardKey] = useState<string | null>(null);
+  const [confirmedCount, setConfirmedCount] = useState(0);
+  const [confirmationFailed, setConfirmationFailed] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -33,6 +42,8 @@ export function FlashcardReviewView({ courseId }: FlashcardReviewViewProps) {
       const result = await getDueFlashcards(courseId);
       setCards(result.cards);
       setDueCount(result.due_count);
+      setConfirmedCount(0);
+      setConfirmationFailed(false);
     } catch {
       setCards([]);
       setDueCount(0);
@@ -45,6 +56,27 @@ export function FlashcardReviewView({ courseId }: FlashcardReviewViewProps) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const confirmReview = useCallback(async (card: Flashcard, index: number) => {
+    const key = reviewCardKey(card, index);
+    if (confirmingCardKey) return;
+    setConfirmingCardKey(key);
+    try {
+      // "确认已复盘" represents a successful recall.  The server owns FSRS
+      // scheduling, content progress and knowledge-graph mastery updates.
+      await reviewFlashcard(card, 3);
+      setCards((current) => current.filter((item, currentIndex) => reviewCardKey(item, currentIndex) !== key));
+      setDueCount((current) => Math.max(0, current - 1));
+      setConfirmedCount((current) => current + 1);
+      useWorkspaceStore.getState().triggerRefresh("analytics");
+      useWorkspaceStore.getState().triggerRefresh("practice");
+      window.dispatchEvent(new Event(LEARNING_HOME_INVALIDATION_EVENT));
+    } catch {
+      setConfirmationFailed(true);
+    } finally {
+      setConfirmingCardKey(null);
+    }
+  }, [confirmingCardKey]);
 
   if (loading) {
     return (
@@ -69,6 +101,14 @@ export function FlashcardReviewView({ courseId }: FlashcardReviewViewProps) {
         <p className="text-xs leading-relaxed text-muted-foreground">
           {t("flashcard.review.countExplanation")}
         </p>
+        {confirmedCount > 0 ? (
+          <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300" role="status">
+            {t("flashcard.review.confirmed").replace("{count}", String(confirmedCount))}
+          </p>
+        ) : null}
+        {confirmationFailed ? (
+          <p className="text-xs font-medium text-destructive" role="alert">{t("flashcard.reviewFailed")}</p>
+        ) : null}
       </div>
 
       {failed ? (
@@ -101,6 +141,19 @@ export function FlashcardReviewView({ courseId }: FlashcardReviewViewProps) {
                 <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">{t("flashcard.review.back")}</p>
                 <p className="mt-1 min-w-0 whitespace-pre-wrap break-words text-sm leading-6 text-foreground/80 [overflow-wrap:anywhere]">{card.back}</p>
               </div>
+              <Button
+                type="button"
+                size="sm"
+                className="mt-4 w-full"
+                disabled={confirmingCardKey !== null}
+                aria-busy={confirmingCardKey === reviewCardKey(card, index)}
+                onClick={() => void confirmReview(card, index)}
+              >
+                <CheckCircle2 className="size-4" aria-hidden />
+                {confirmingCardKey === reviewCardKey(card, index)
+                  ? t("flashcard.review.confirming")
+                  : t("flashcard.review.confirm")}
+              </Button>
             </article>
           ))}
         </div>

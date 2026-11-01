@@ -78,11 +78,20 @@ async def sync_course(
             source_url = last_url_job.url
 
     if not source_url:
-        from libs.exceptions import ValidationError
-        raise ValidationError(
-            "No source URL found for this course. "
-            "Upload a URL first before syncing."
-        )
+        # The workspace header is also the learner-facing refresh action for
+        # uploaded PDF/Word/PPT spaces. Such spaces intentionally have no
+        # remote URL to crawl, so this must not be reported as bad input.
+        return {
+            "status": "local_refreshed",
+            "new_files": 0,
+            "updated_files": 0,
+            "unchanged_files": 0,
+            "files_discovered": 0,
+            "job_id": "",
+            "job_status": "not_applicable",
+            "nodes_created": 0,
+            "content_changed": False,
+        }
 
     # 2. Gather existing content hashes for this course
     existing_result = await db.execute(

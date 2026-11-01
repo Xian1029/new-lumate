@@ -93,6 +93,7 @@ def _serialize_content_tree(nodes: list[CourseContentTree]) -> list[ContentNodeR
             source_type=node.source_type,
             source_file=getattr(node, "source_file", None),
             content_category=getattr(node, "content_category", None),
+            metadata=getattr(node, "metadata_", None),
             children=[build(child) for child in by_parent.get(node.id, [])],
         )
 
@@ -295,11 +296,24 @@ async def empty_course_trash(user: User = Depends(get_current_user), db: AsyncSe
 
 @router.post("/", response_model=CourseResponse, status_code=201, summary="Create a course", description="Create a new course for the current user.")
 async def create_course(body: CourseCreate, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    # New learning spaces must not depend on a browser-local first-visit
+    # fallback. Persist the same mode-based baseline at creation time so every
+    # entry point (upload wizard, direct API, import) starts with the complete
+    # workspace and its shared progress/review rules.
+    from services.workspace_layout import WorkspaceLayoutService
+
+    metadata = body.metadata.model_dump(exclude_none=True) if body.metadata else {}
+    mode = metadata.get("learning_mode") or "course_following"
+    if not isinstance(metadata.get("spaceLayout"), dict):
+        metadata["spaceLayout"] = WorkspaceLayoutService.default_layout(mode)
+    else:
+        metadata["spaceLayout"] = WorkspaceLayoutService.normalize(metadata["spaceLayout"])
+    metadata["learning_mode"] = metadata["spaceLayout"].get("mode", "course_following")
     course = Course(
         user_id=user.id,
         name=body.name,
         description=body.description,
-        metadata_=body.metadata.model_dump(exclude_none=True) if body.metadata else None,
+        metadata_=metadata,
         status=body.status,
     )
     db.add(course)

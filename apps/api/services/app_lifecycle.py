@@ -88,6 +88,12 @@ def _upgrade_local_question_catalog_schema(connection) -> None:
 # (0026/0027); old local SQLite files must not 500 on INSERT just because
 # create_all cannot alter an existing table.
 _LOCAL_ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
+    "users": {
+        "username": "VARCHAR(64)",
+        "role": "VARCHAR(20) NOT NULL DEFAULT 'student'",
+        "must_change_password": "BOOLEAN NOT NULL DEFAULT 0",
+        "updated_at": "DATETIME",
+    },
     "courses": {
         "status": "VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'",
         "deleted_at": "DATETIME",
@@ -130,6 +136,10 @@ def _upgrade_local_additive_columns(connection) -> None:
                 connection.exec_driver_sql(
                     f"ALTER TABLE {table} ADD COLUMN {name} {definition}"
                 )
+    if "users" in existing_tables:
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username ON users (username)"
+        )
     if "ingestion_jobs" in existing_tables:
         connection.exec_driver_sql(
             "UPDATE ingestion_jobs SET processing_attempt_id = id "
@@ -154,6 +164,25 @@ async def _maybe_seed_system_data() -> None:
         await seed_builtin_templates(db)
         await db.commit()
     logger.info("Seeded built-in templates")
+
+
+async def _ensure_super_admin() -> None:
+    """Create admin once; never reset an existing password on restart."""
+    if settings.deployment_mode != "multi_user":
+        return
+    if not settings.admin_initial_password:
+        raise RuntimeError("ADMIN_INITIAL_PASSWORD is required in multi_user mode")
+    from sqlalchemy import select
+    from database import async_session
+    from models.user import User
+    from services.auth.password import hash_password
+    async with async_session() as db:
+        admin = (await db.execute(select(User).where(User.username == "admin"))).scalar_one_or_none()
+        if admin is None:
+            db.add(User(username="admin", name="管理员", role="super_admin", is_active=True,
+                        must_change_password=True, hashed_password=hash_password(settings.admin_initial_password)))
+            await db.commit()
+            logger.info("Initialized super administrator account")
 
 
 async def _migrate_upload_storage_records() -> None:
@@ -491,6 +520,7 @@ def _print_auth_warning() -> None:
 async def run_startup_hooks() -> None:
     _print_auth_warning()
     await _maybe_create_tables()
+    await _ensure_super_admin()
     await _maybe_bootstrap_migration_tracking()
     await _migrate_upload_storage_records()
     await _finalize_legacy_embedding_jobs()

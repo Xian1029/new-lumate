@@ -1,6 +1,6 @@
 import uuid
 
-from services.content_text import clean_course_text, normalize_pdf_markdown
+from services.content_text import clean_course_text, has_unreadable_text, normalize_pdf_markdown
 from services.ingestion.classification import classify_by_content_heuristics, classify_by_filename
 from services.parser.pdf import _markdown_to_tree
 from services.parser.notes import build_fallback_notes
@@ -13,6 +13,12 @@ def test_pdf_cleanup_keeps_line_boundaries_and_removes_font_garbage() -> None:
 
     assert cleaned == "第一单元\n春天\n第二单元"
     assert "第一单元第二单元" not in cleaned
+
+
+def test_text_quality_gate_rejects_common_encoding_and_font_corruption() -> None:
+    assert has_unreadable_text("答案\ufffd无法显示")
+    assert has_unreadable_text("૫ે໓ྍJOEE")
+    assert not has_unreadable_text("有理数 $x^2$ 的运算规则")
 
 
 def test_language_textbook_uses_units_and_numbered_lessons() -> None:

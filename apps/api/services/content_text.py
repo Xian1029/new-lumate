@@ -22,6 +22,13 @@ _PRIVATE_USE_GLYPHS = re.compile(r"[\ue000-\uf8ff\U000f0000-\U000ffffd\U00100000
 # ingestion boundary.  Remove only the invalid code points; surrounding text
 # remains unchanged.
 _LONE_SURROGATES = re.compile(r"[\ud800-\udfff]")
+# Scripts below are not expected in a Chinese K-12 course, aside from a rare
+# quoted example. A dense mixed run is a reliable sign of broken PDF font
+# mapping rather than learner-facing text (for example Gujarati + Lao +
+# Tibetan glyphs produced for one Chinese character).
+_UNLIKELY_FONT_GLYPHS = re.compile(
+    r"[\u0530-\u058f\u0590-\u08ff\u0900-\u0dff\u0e00-\u0fff\u10a0-\u10ff\u1200-\u1fff]"
+)
 _EXCESS_BLANK_LINES = re.compile(r"\n{3,}")
 _CJK_SPACE = re.compile(r"(?<=[\u3400-\u4dbf\u4e00-\u9fff])[ \t\u00a0\u2000-\u200b]+(?=[\u3400-\u4dbf\u4e00-\u9fff])")
 _SPACE_BEFORE_PUNCT = re.compile(r"\s+([，。！？；：、）》）】』】〉》])")
@@ -183,6 +190,27 @@ def clean_course_text(value: str | None) -> str | None:
     value = _SPACE_AFTER_OPEN.sub(r"\1", value)
     value = _EXCESS_BLANK_LINES.sub("\n\n", value)
     return value.strip()
+
+
+def has_unreadable_text(value: str | None) -> bool:
+    """Return whether learner-facing text contains encoding/font corruption.
+
+    This is deliberately conservative: normal Chinese, mathematical symbols
+    and Markdown are allowed; replacement characters, private-use glyph IDs,
+    invalid surrogates and non-printing controls are not.
+    """
+    if value is None:
+        return False
+    if bool(
+        "\ufffd" in value
+        or _UNSAFE_CONTROLS.search(value)
+        or _PRIVATE_USE_GLYPHS.search(value)
+        or _LONE_SURROGATES.search(value)
+    ):
+        return True
+    significant = [char for char in value if unicodedata.category(char)[0] in {"L", "M", "N", "S"}]
+    suspicious = _UNLIKELY_FONT_GLYPHS.findall(value)
+    return len(suspicious) >= 3 and len(suspicious) * 3 >= max(len(significant), 1)
 
 
 def clean_course_title(value: str | None, fallback: str = "Untitled") -> str:

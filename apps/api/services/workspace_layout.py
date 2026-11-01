@@ -16,6 +16,32 @@ BLOCK_TYPES = {
 REQUIRED_TYPES = {"chapter_list", "notes"}
 SIZES = {"small", "medium", "large", "full"}
 SOURCES = {"SYSTEM_REQUIRED", "SYSTEM_OPTIONAL", "USER_ADDED"}
+_VALID_MODES = {"course_following", "self_paced", "exam_prep", "maintenance"}
+
+# This is the server-owned counterpart of the client workspace templates.
+# It is used only while creating a learning space that has no explicit layout,
+# so direct API creation, imports and the regular upload wizard all start with
+# the same functional baseline. Existing learner customizations are never
+# replaced by this default.
+_MODE_BLOCKS: dict[str, list[tuple[str, str, dict[str, Any]]]] = {
+    "course_following": [
+        ("chapter_list", "full", {}), ("notes", "full", {}),
+        ("progress", "full", {}), ("quiz", "medium", {}),
+        ("flashcards", "medium", {}), ("knowledge_graph", "full", {}),
+        ("forecast", "full", {}),
+    ],
+    "self_paced": [
+        ("chapter_list", "full", {}), ("notes", "full", {}),
+        ("progress", "full", {}), ("flashcards", "full", {}),
+        ("knowledge_graph", "full", {}), ("forecast", "full", {}),
+    ],
+    "exam_prep": [
+        ("chapter_list", "full", {}), ("notes", "full", {"note_format": "summary", "purpose": "exam_review"}),
+        ("quiz", "large", {"difficulty": "hard"}), ("progress", "full", {}),
+        ("plan", "full", {}), ("knowledge_graph", "full", {}),
+        ("forecast", "full", {}),
+    ],
+}
 
 
 def _source(raw: Any, block_type: str) -> str:
@@ -28,6 +54,35 @@ def _source(raw: Any, block_type: str) -> str:
 
 class WorkspaceLayoutService:
     """Validate and normalize the persisted display-only workspace layout."""
+
+    @staticmethod
+    def default_layout(mode: Any = "course_following") -> dict[str, Any]:
+        """Return a complete, deterministic initial workspace layout.
+
+        ``maintenance`` is a legacy mode and intentionally maps to the
+        current self-paced baseline, matching the frontend's migration rule.
+        """
+        effective_mode = mode if isinstance(mode, str) and mode in _VALID_MODES else "course_following"
+        if effective_mode == "maintenance":
+            effective_mode = "self_paced"
+        blocks = []
+        for position, (block_type, size, config) in enumerate(_MODE_BLOCKS[effective_mode]):
+            blocks.append({
+                "id": f"mode-{effective_mode}-{block_type}-{position}",
+                "type": block_type,
+                "position": position,
+                "size": size,
+                "config": dict(config),
+                "isVisible": True,
+                "isPinned": False,
+                "source": _source(None, block_type),
+            })
+        return {
+            "templateId": None,
+            "blocks": blocks,
+            "columns": 2,
+            "mode": effective_mode,
+        }
 
     @staticmethod
     def normalize(layout: Any) -> dict[str, Any]:
@@ -61,6 +116,15 @@ class WorkspaceLayoutService:
         if "chapter_list" not in seen_types:
             blocks.insert(0, {
                 "id": "core-chapter_list", "type": "chapter_list", "position": 0,
+                "size": "full", "config": {}, "isVisible": True,
+                "isPinned": False, "source": "SYSTEM_REQUIRED",
+            })
+        if "notes" not in seen_types:
+            # Notes are a foundational course-grounded learning capability,
+            # just like the course outline. Do not leave an incomplete or
+            # legacy layout without an accessible notes surface.
+            blocks.insert(1 if blocks else 0, {
+                "id": "core-notes", "type": "notes", "position": 0,
                 "size": "full", "config": {}, "isVisible": True,
                 "isPinned": False, "source": "SYSTEM_REQUIRED",
             })

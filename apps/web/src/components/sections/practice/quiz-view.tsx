@@ -147,14 +147,20 @@ export function QuizView({
   const questionStartTimeRef = useRef(Date.now());
   const restoredRef = useRef(false);
   const freshSessionRequestedRef = useRef(false);
+  // A chapter switch can happen while an earlier request is still in flight.
+  // Only the newest request may update the visible quiz session.
+  const loadRequestRef = useRef(0);
   const [sessionBatchId, setSessionBatchId] = useState<string | null>(null);
   const { save, load, clear, subscribe } = useQuizPersistence(courseId, selectedNodeId);
 
   const fetchData = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
     if (!selectedNodeId) {
-      setProblems([]);
-      setLoading(false);
+      if (requestId === loadRequestRef.current) {
+        setProblems([]);
+        setLoading(false);
+      }
       return;
     }
     try {
@@ -256,18 +262,28 @@ export function QuizView({
             nextBatchId = latest.batchId;
           }
         }
+      } else {
+        // A focused quiz can be generated from the chapter page while this
+        // view is already mounted. On that refresh, never fall back to every
+        // historical problem in the chapter: the newest server batch is the
+        // learner-visible exercise set (for example the 8 focused questions).
+        const latest = selectLatestExerciseSet(usableItems);
+        sessionItems = latest.items;
+        nextBatchId = latest.batchId;
       }
+      if (requestId !== loadRequestRef.current) return;
       setProblems(sessionItems);
       setSessionBatchId(nextBatchId);
       setCurrentIdx((index) => Math.min(index, Math.max(sessionItems.length - 1, 0)));
     } catch {
-      setProblems([]);
+      if (requestId === loadRequestRef.current) setProblems([]);
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestRef.current) setLoading(false);
     }
   }, [aiActionsEnabled, clear, courseId, difficultyHint, load, modeHint, save, selectedNodeId]);
 
   useEffect(() => {
+    loadRequestRef.current += 1;
     restoredRef.current = false;
     setProblems([]);
     setCurrentIdx(0);
@@ -348,7 +364,7 @@ export function QuizView({
       } else {
         setExtractStatus("暂时没有生成出可用的新题，请稍后重试。");
       }
-    } catch (error) {
+    } catch {
       setExtractStatus(t("quiz.extract.failed"));
     } finally {
       setExtracting(false);
@@ -863,11 +879,15 @@ export function QuizView({
                 })()}
               </ul>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div
+              className="grid grid-cols-1 gap-2 min-[540px]:grid-cols-2"
+              data-testid="quiz-completion-actions"
+            >
               <Button
                 type="button"
                 size="sm"
                 variant="default"
+                className="w-full min-w-0"
                 onClick={() => {
                   resetQuizState();
                   toast.success("已重置全部答题记录");
@@ -879,6 +899,7 @@ export function QuizView({
                 type="button"
                 size="sm"
                 variant="outline"
+                className="w-full min-w-0"
                 disabled={!aiActionsEnabled || generatingReinforcement}
                 onClick={() => void handleGenerateReinforcement()}
               >
@@ -888,13 +909,15 @@ export function QuizView({
                 type="button"
                 size="sm"
                 variant="outline"
+                className="w-full min-w-0"
                 disabled={!aiActionsEnabled || generatingFresh}
+                aria-busy={generatingFresh}
                 onClick={() => void handleGenerateFresh()}
               >
                 {generatingFresh ? "正在准备新题…" : "换一组不重复的新题"}
               </Button>
               {exitHref ? (
-                <Button asChild type="button" size="sm" variant="ghost">
+                <Button asChild type="button" size="sm" variant="ghost" className="w-full min-w-0">
                   <Link href={exitHref}>退出测验</Link>
                 </Button>
               ) : null}

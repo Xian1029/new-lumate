@@ -8,12 +8,26 @@ Reference: textbook_quality project for content generation pipeline.
 """
 
 from services.llm.router import get_llm_client
+from services.content_text import clean_course_text, has_unreadable_text
 import re
 import unicodedata
 
 
 _CONTROL_CHARACTERS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _MOJIBAKE_MARKERS = re.compile(r"(?:Ã.|Â.|â..|[\u00c2-\u00f4][\u0080-\u00bf])")
+
+
+def is_primary_chinese(value: str | None) -> bool:
+    """Whether learner-facing text is primarily Simplified Chinese.
+
+    Formulae and short symbols are normal in maths notes, so this deliberately
+    permits a modest amount of Latin text while rejecting an English note that
+    merely includes a Chinese chapter title.
+    """
+    text = value or ""
+    han_count = len(re.findall(r"[\u4e00-\u9fff]", text))
+    latin_count = len(re.findall(r"[A-Za-z]", text))
+    return han_count >= 4 and han_count >= latin_count * 0.35
 
 
 def normalize_generated_markdown(value: str | None) -> str:
@@ -55,7 +69,10 @@ def normalize_generated_markdown(value: str | None) -> str:
         char for char in cleaned
         if unicodedata.category(char) != "Cf" or char in {"\n", "\t"}
     )
-    return unicodedata.normalize("NFC", cleaned).strip()
+    cleaned = unicodedata.normalize("NFC", cleaned).strip()
+    # Use the same final boundary as imported course text.  This removes font
+    # glyph IDs and control artifacts before an AI note can be saved or shown.
+    return clean_course_text(cleaned) or ""
 
 # Format-specific system prompts for note restructuring
 FORMAT_PROMPTS = {
@@ -252,13 +269,37 @@ Important:
 - Keep Mermaid labels simple and diagram-safe; move detailed examples into bullets below the diagram
 - Do NOT add information not present in the original content"""
 
+    source_requires_chinese = is_primary_chinese(f"{title}\n{content}")
+    if source_requires_chinese:
+        system_prompt += """
+
+Output language requirement:
+- The source material is Chinese. Write every learner-facing heading, explanation,
+  bullet, table cell and Mermaid label in natural Simplified Chinese.
+- Do not output English prose. Mathematical symbols, variables and standard
+  formula notation may remain unchanged."""
+
     user_message = f"## {title}\n\n{content}"
 
     try:
         client = get_llm_client()
         result, _ = await client.chat(system_prompt, user_message)
         normalized = normalize_generated_markdown(result)
-        if normalized and "No LLM API key configured" not in normalized:
+        if source_requires_chinese and normalized and not is_primary_chinese(normalized):
+            # Providers can occasionally follow their default English persona
+            # despite a Chinese textbook. Retry once with an unambiguous
+            # language-only instruction before falling back to source-based
+            # Chinese notes.
+            retry_prompt = system_prompt + """
+
+This is a mandatory correction pass. Your previous answer was not primarily
+Simplified Chinese. Return the complete note again in Simplified Chinese only;
+do not explain the correction and do not include English prose."""
+            retry_result, _ = await client.chat(retry_prompt, user_message)
+            normalized = normalize_generated_markdown(retry_result)
+            if normalized and not is_primary_chinese(normalized):
+                raise RuntimeError("AI 笔记未能生成中文内容")
+        if normalized and not has_unreadable_text(normalized) and "No LLM API key configured" not in normalized:
             return normalized
     except Exception as exc:
         if not allow_fallback:

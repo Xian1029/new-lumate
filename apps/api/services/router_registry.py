@@ -8,6 +8,7 @@ from config import settings
 from routers import (
     agenda,
     auth,
+    ai_settings,
     block_routes,
     canvas,
     chat,
@@ -22,6 +23,7 @@ from routers import (
     notes,
     notifications,
     onboarding,
+    pdf_reader,
     preferences,
     progress,
     quiz,
@@ -36,6 +38,7 @@ from routers import (
 
 CORE_ROUTERS = (
     (health.router, "/api", ["health"]),
+    (pdf_reader.router, "/api/pdf-reader", ["pdf-reader"]),
     (upload.router, "/api/content", ["content"]),
     (chat.router, "/api/chat", ["chat"]),
     (courses.router, "/api/courses", ["courses"]),
@@ -74,6 +77,7 @@ def _include_router(app: FastAPI, router, prefix: str | None = None, tags: list[
 def register_routers(app: FastAPI) -> None:
     if settings.auth_enabled:
         _include_router(app, auth.router, prefix="/api/auth", tags=["auth"])
+        _include_router(app, ai_settings.router, prefix="/api/ai-settings", tags=["ai-settings"])
 
     for router, prefix, tags in CORE_ROUTERS:
         _include_router(app, router, prefix=prefix, tags=tags)

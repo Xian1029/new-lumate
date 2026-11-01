@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.progress import LearningProgress
 from models.content import CourseContentTree
+from models.ingestion import StudySession
 from services.learning_progress import course_progress_snapshot, course_progress_view
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,23 @@ async def get_course_progress(
     mastered = sum(1 for p in snapshot.progress_by_node.values() if p.status == "mastered")
     reviewed = sum(1 for p in snapshot.progress_by_node.values() if p.status == "reviewed")
     in_progress = sum(1 for p in snapshot.progress_by_node.values() if p.status == "in_progress")
-    total_time = sum(p.time_spent_minutes for p in progress_entries)
+    # Focused study time is recorded by the browser heartbeat in
+    # ``StudySession``.  ``LearningProgress.time_spent_minutes`` is a legacy
+    # per-node field and is not updated for reading, notes, review or graph
+    # sessions, which made the course card incorrectly stay at 0 minutes.
+    session_result = await db.execute(
+        select(StudySession).where(
+            StudySession.user_id == user_id,
+            StudySession.course_id == course_id,
+        )
+    )
+    sessions = session_result.scalars().all()
+    total_time = sum(
+        session.active_seconds
+        if session.active_seconds
+        else (session.duration_minutes or 0) * 60
+        for session in sessions
+    ) // 60
     avg_mastery = (
         sum(p.mastery_score for p in progress_entries) / len(progress_entries)
         if progress_entries else 0.0

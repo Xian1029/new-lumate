@@ -36,4 +36,20 @@ describe("PracticeSection scopes", () => {
     expect(await screen.findByTestId("flashcard-review-content")).toBeInTheDocument();
     expect(screen.queryByTestId("quiz-review-content")).not.toBeInTheDocument();
   });
+
+  it("keeps the review source when entered from the cards tab", async () => {
+    render(<PracticeSection courseId="course" defaultTab="quiz" />);
+    fireEvent.click(screen.getByRole("tab", { name: "course.cards" }));
+    expect(await screen.findByTestId("flashcard-content")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "course.review" }));
+    expect(await screen.findByTestId("flashcard-review-content")).toBeInTheDocument();
+    expect(screen.queryByTestId("quiz-review-content")).not.toBeInTheDocument();
+  });
+
+  it("does not assume a review source for a direct combined review entry", async () => {
+    render(<PracticeSection courseId="course" defaultTab="review" />);
+    expect(await screen.findByTestId("review-source-picker")).toBeInTheDocument();
+    expect(screen.queryByTestId("quiz-review-content")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("flashcard-review-content")).not.toBeInTheDocument();
+  });
 });

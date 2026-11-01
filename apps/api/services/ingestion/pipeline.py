@@ -69,6 +69,7 @@ logger = logging.getLogger(__name__)
 # the dedup digest lets an already-uploaded document be rebuilt once with the
 # new chapter/section parser instead of returning its legacy noisy tree.
 _INGESTION_SCHEMA_VERSION = b"textbook-sections-v7-structured-report-sections\0"
+_PDF_EXTRACTION_REPAIR_VERSION = b"pdf-bounded-page-retry-v1\0"
 
 _PHASE_LABELS = {
     "uploaded": "Upload received",
@@ -256,9 +257,12 @@ async def run_ingestion_pipeline(
     content_hash = None
     if file_bytes:
         from services.parser.english_textbook import is_english_textbook
-        # Only English imports rebuild after this repair. Existing math,
-        # Chinese and report dedup hashes stay unchanged.
         ingestion_version = _INGESTION_SCHEMA_VERSION
+        # A re-upload of a PDF that was processed before the bounded page
+        # retry repair must run the extractor again rather than be treated as
+        # a duplicate of its partially extracted predecessor.
+        if filename.lower().endswith(".pdf"):
+            ingestion_version += _PDF_EXTRACTION_REPAIR_VERSION
         if is_english_textbook(filename):
             ingestion_version += b"english-page-complete-v1\0"
         try:
@@ -543,13 +547,19 @@ async def run_ingestion_pipeline(
 
         preview_nodes = None
         if job.content_category == "textbook" and (filename or "").lower().endswith(".pdf"):
-            from services.parser.pdf import _markdown_to_tree, assess_textbook_outline_integrity
+            from services.parser.pdf import _annotate_source_pages, _markdown_to_tree, assess_textbook_outline_integrity
 
             _set_job_phase(job, status="classifying", progress_percent=55, workflow_state="DETECTING_STRUCTURE")
             await db.commit()
             preview_nodes = await asyncio.to_thread(
                 _markdown_to_tree, extracted, job.course_id or uuid.uuid4(), filename,
             )
+            # The textbook preview nodes are the exact objects persisted by
+            # dispatch_content. Annotate them here (rather than in the unused
+            # standalone parser path) so page links survive source-TOC
+            # restructuring and reach the notes viewer.
+            if file_path:
+                await asyncio.to_thread(_annotate_source_pages, preview_nodes, file_path)
             outline_complete, outline_report = assess_textbook_outline_integrity(
                 extracted, preview_nodes,
             )
@@ -602,12 +612,18 @@ async def run_ingestion_pipeline(
         dispatch_result = await _dispatch_content(db, job, parsed_nodes=preview_nodes)
         job.dispatched = True
         job.dispatched_to = dispatch_result
-        text_categories = {"lecture_slides", "textbook", "notes", "syllabus"}
-        # Generic office documents are valid learning material even when the
-        # classifier cannot infer a subject. They still need a content tree;
-        # otherwise a perfectly readable DOCX is reported as unparseable.
-        office_text_source = (filename or "").lower().endswith((".docx", ".doc", ".odt", ".rtf"))
-        if (job.content_category in text_categories or office_text_source) and not (dispatch_result or {}).get("content_tree"):
+        text_categories = {
+            "lecture_slides", "textbook", "notes", "syllabus",
+            "assignment", "exam_schedule",
+        }
+        # Classification is advisory, not a gate to material usability. Every
+        # supported document with extracted text must either create a learning
+        # tree or surface a clear retryable extraction message; it must never
+        # be marked completed with zero learnable content.
+        learning_document_source = (filename or "").lower().endswith(
+            (".pdf", ".docx", ".doc", ".pptx", ".ppt", ".txt", ".md", ".html", ".htm", ".odt", ".rtf")
+        )
+        if (job.content_category in text_categories or learning_document_source) and not (dispatch_result or {}).get("content_tree"):
             _set_job_phase(
                 job,
                 status="failed",

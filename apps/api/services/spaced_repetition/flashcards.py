@@ -7,7 +7,7 @@ Reference: spaceforge — 6-provider AI flashcard generation pattern.
 import uuid
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,11 +15,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.content import CourseContentTree
 from models.progress import LearningProgress
 from services.llm.router import get_llm_client
-from services.content_text import is_assessment_content, is_generic_textbook_prompt, is_non_learning_question
+from services.content_text import clean_course_text, has_unreadable_text, is_assessment_content, is_generic_textbook_prompt, is_non_learning_question
 from services.generated_assets import get_active_note_markdown_by_node
 from services.spaced_repetition.fsrs import FSRSCard, review_card
 
 logger = logging.getLogger(__name__)
+
+
+def is_flashcard_due(card: dict, now: datetime | None = None) -> bool:
+    """Return whether a persisted card belongs in today's review queue.
+
+    New cards and legacy cards without a usable due date are intentionally due:
+    hiding them would make a learner-facing reminder disagree with the review
+    screen.  Keep this small predicate shared by the API and home read model.
+    """
+    fsrs = card.get("fsrs") or {}
+    due = fsrs.get("due")
+    if not due:
+        return True
+    try:
+        due_at = datetime.fromisoformat(str(due).replace("Z", "+00:00"))
+        if due_at.tzinfo is None:
+            due_at = due_at.replace(tzinfo=timezone.utc)
+        return due_at <= (now or datetime.now(timezone.utc))
+    except (TypeError, ValueError):
+        return True
 
 FLASHCARD_PROMPT = """Generate flashcards from this educational content.
 
@@ -76,7 +96,7 @@ def _is_in_requested_language(card: object, language: str | None) -> bool:
         return False
     front = str(card.get("front") or "").strip()
     back = str(card.get("back") or "").strip()
-    if not front or not back:
+    if not front or not back or has_unreadable_text(front) or has_unreadable_text(back):
         return False
     text = f"{front} {back}"
     if language == "zh":
@@ -90,6 +110,18 @@ def _is_in_requested_language(card: object, language: str | None) -> bool:
     if language == "en":
         return len(re.findall(r"[A-Za-z]{3,}", text)) >= 2
     return True
+
+
+def _normalize_flashcard_text(card: object) -> dict | None:
+    """Normalize safe display fields, rejecting any card with corrupt text."""
+    if not isinstance(card, dict):
+        return None
+    front = str(card.get("front") or "")
+    back = str(card.get("back") or "")
+    if has_unreadable_text(front) or has_unreadable_text(back):
+        return None
+    normalized = {**card, "front": clean_course_text(front) or "", "back": clean_course_text(back) or ""}
+    return normalized if normalized["front"] and normalized["back"] else None
 
 
 def _fallback_chinese_flashcards(content: str, title: str, count: int) -> list[dict]:
@@ -212,10 +244,11 @@ async def generate_flashcards(
         flashcards = []
 
     flashcards = [
-        card for card in flashcards
-        if _is_in_requested_language(card, language)
-        and not is_non_learning_question(str(card.get("front") or ""))
-        and not is_generic_textbook_prompt(str(card.get("front") or ""))
+        normalized for card in flashcards
+        if (normalized := _normalize_flashcard_text(card)) is not None
+        and _is_in_requested_language(normalized, language)
+        and not is_non_learning_question(str(normalized.get("front") or ""))
+        and not is_generic_textbook_prompt(str(normalized.get("front") or ""))
     ]
     excluded_normalized = {
         re.sub(r"\s+", "", str(front)).casefold()
@@ -245,10 +278,11 @@ async def generate_flashcards(
         retry_cards = parse_llm_json(retry_response, default=[])
         if isinstance(retry_cards, list):
             flashcards = [
-                card for card in retry_cards
-                if _is_in_requested_language(card, language)
-                and not is_non_learning_question(str(card.get("front") or ""))
-                and not is_generic_textbook_prompt(str(card.get("front") or ""))
+                normalized for card in retry_cards
+                if (normalized := _normalize_flashcard_text(card)) is not None
+                and _is_in_requested_language(normalized, language)
+                and not is_non_learning_question(str(normalized.get("front") or ""))
+                and not is_generic_textbook_prompt(str(normalized.get("front") or ""))
             ]
 
     # Apply novelty filtering after every generation path, including the

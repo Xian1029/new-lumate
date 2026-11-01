@@ -317,10 +317,13 @@ export function useNewProject() {
       // group, create one learning space per group and upload each file to
       // its own space instead of mixing everything into one course.
       const plannedGroups = uploadPlan?.groups ?? [];
-      // Choosing the unified destination for any file is an intentional
-      // switch of grouping mode, so the batch cannot accidentally lose the
-      // remaining files between separate group buckets.
-      const combineAllFiles = files.length > 0 && Object.values(fileAssignments).includes("__all__");
+      // A name entered by the learner is an explicit request for one learning
+      // space. Detection enriches metadata, but must not replace that name or
+      // silently split the selected material.
+      const hasExplicitProjectName = projectName.trim().length > 0;
+      const combineAllFiles = files.length > 0 && (
+        hasExplicitProjectName || Object.values(fileAssignments).includes("__all__")
+      );
       if (combineAllFiles) {
         // A unified upload is a new, explicitly named destination. Never
         // silently fall back to an opaque generic space: use the user-entered

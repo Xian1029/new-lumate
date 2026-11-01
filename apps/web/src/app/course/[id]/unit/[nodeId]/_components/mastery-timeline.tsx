@@ -55,6 +55,7 @@ export function MasteryTimeline({ snapshots, t, tf }: { snapshots: MasterySnapsh
 export function NextActionsSection({
   courseId,
   masterySummary,
+  activeWrongAnswerCount,
   errorTrend,
   difficultyRec,
   quizModeHint,
@@ -67,6 +68,7 @@ export function NextActionsSection({
 }: {
   courseId: string;
   masterySummary: MasterySummary;
+  activeWrongAnswerCount: number;
   errorTrend: ErrorTrendSummary;
   difficultyRec: DifficultyRecommendation;
   quizModeHint: string;
@@ -79,7 +81,7 @@ export function NextActionsSection({
 }) {
   const nextAction = getNextLearningAction({
     urgentReviewCount: masterySummary.urgent,
-    wrongAnswerCount: errorTrend.recent7d + errorTrend.previous7d,
+    activeWrongAnswerCount,
     errorTrend,
   });
   return (

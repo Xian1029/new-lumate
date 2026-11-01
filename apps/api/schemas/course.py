@@ -92,6 +92,7 @@ class ContentNodeResponse(BaseModel):
     source_type: str
     source_file: str | None = None
     content_category: str | None = None
+    metadata: dict | None = None
     children: list["ContentNodeResponse"] = []
 
     model_config = {"from_attributes": True}

@@ -517,17 +517,31 @@ async def submit_answer(
 
     # Update LOOM concept mastery for each knowledge point (skipped for
     # NEEDS_REVIEW — an ungradeable answer must not move mastery).
-    if kp_list and profile_update_allowed:
-        from services.loom_mastery import update_concept_mastery
+    if profile_update_allowed:
+        from services.loom_mastery import update_concept_mastery, update_content_node_mastery
+        updated_concepts = 0
         for kp in kp_list:
             try:
-                await update_concept_mastery(
+                mastery = await update_concept_mastery(
                     db, user.id, str(kp), problem.course_id,
                     correct=is_correct, question_type=problem.question_type,
                     content_node_id=problem.content_node_id,
                 )
+                updated_concepts += int(mastery is not None)
             except (SQLAlchemyError, ValueError, KeyError):
                 logger.exception("Concept mastery update failed for '%s'", kp)
+                warnings.append("concept_mastery_update_failed")
+
+        # If generated question labels cannot be resolved, use the canonical
+        # chapter-node relation instead of leaving the knowledge graph stale.
+        if updated_concepts == 0 and problem.content_node_id is not None:
+            try:
+                await update_content_node_mastery(
+                    db, user.id, problem.course_id, problem.content_node_id,
+                    correct=is_correct, question_type=problem.question_type,
+                )
+            except (SQLAlchemyError, ValueError, KeyError):
+                logger.exception("Content-node mastery fallback failed for %s", problem.content_node_id)
                 warnings.append("concept_mastery_update_failed")
 
     # Emit analytics event before committing — single transaction for atomicity

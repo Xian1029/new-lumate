@@ -1,6 +1,7 @@
 """SQLAlchemy ORM models — import all to register with Base.metadata."""
 
-from models.user import User
+from models.user import User, UserSession
+from models.ai_settings import PlatformAISettings, UserAISettings
 from models.course import Course
 from models.content import CourseContentTree
 from models.preference import UserPreference, PreferenceSignal
@@ -39,6 +40,9 @@ from models.question_catalog import (
 
 __all__ = [
     "User",
+    "UserSession",
+    "PlatformAISettings",
+    "UserAISettings",
     "Course",
     "CourseContentTree",
     "UserPreference",

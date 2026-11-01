@@ -48,11 +48,15 @@ export function WorkspaceHeader({
     setSyncMessage(null);
     try {
       const result = await syncCourse(courseId);
-      const parts: string[] = [];
-      if (result.new_files > 0) parts.push(`${result.new_files} 个新文件`);
-      if (result.updated_files > 0) parts.push(`${result.updated_files} 个已更新`);
-      if (result.unchanged_files > 0) parts.push(`${result.unchanged_files} 个无变化`);
-      setSyncMessage(parts.length > 0 ? parts.join("、") : t("ui.up_to_date"));
+      if (result.status === "local_refreshed") {
+        setSyncMessage(t("ui.workspace_refreshed"));
+      } else {
+        const parts: string[] = [];
+        if (result.new_files > 0) parts.push(`${result.new_files} 个新文件`);
+        if (result.updated_files > 0) parts.push(`${result.updated_files} 个已更新`);
+        if (result.unchanged_files > 0) parts.push(`${result.unchanged_files} 个无变化`);
+        setSyncMessage(parts.length > 0 ? parts.join("、") : t("ui.up_to_date"));
+      }
 
       // Refresh content tree and jobs
       void fetchContentTree(courseId);

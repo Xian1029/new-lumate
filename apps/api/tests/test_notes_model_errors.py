@@ -29,6 +29,41 @@ async def test_manual_note_generation_requires_nonempty_ai_content(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chinese_source_retries_when_model_returns_english_notes(monkeypatch):
+    client = SimpleNamespace(chat=AsyncMock(side_effect=[
+        ("# Rational numbers\n\nCompare their values.", {}),
+        ("# 有理数及其大小比较\n\n## 核心内容\n- 比较有理数的大小。", {}),
+    ]))
+    monkeypatch.setattr(notes, 'get_llm_client', lambda: client)
+
+    result = await notes.restructure_notes(
+        '有理数包括正数、负数和零。比较大小时可以借助数轴。',
+        '有理数及其大小比较',
+        allow_fallback=False,
+    )
+
+    assert '比较有理数的大小' in result
+    assert client.chat.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_chinese_source_falls_back_to_chinese_when_retry_is_still_english(monkeypatch):
+    client = SimpleNamespace(chat=AsyncMock(side_effect=[
+        ("# Rational numbers\n\nCompare their values.", {}),
+        ("# Rational numbers\n\nStill English.", {}),
+    ]))
+    monkeypatch.setattr(notes, 'get_llm_client', lambda: client)
+
+    result = await notes.restructure_notes(
+        '有理数包括正数、负数和零。比较大小时可以借助数轴。',
+        '有理数及其大小比较',
+    )
+
+    assert '## 本节学什么' in result
+    assert '有理数' in result
+
+
+@pytest.mark.asyncio
 async def test_balance_probe_reports_unavailable_then_recovers_after_topup(monkeypatch):
     from services.llm.providers import openai_client as module
     available = False

@@ -9,7 +9,7 @@ export default function GlobalError({
 }) {
   return (
     <html lang="zh">
-      <body className="antialiased flex items-center justify-center min-h-screen bg-background text-foreground">
+      <body className="antialiased flex items-center justify-center min-h-screen bg-background text-foreground" data-error-digest={error.digest}>
         <div className="text-center max-w-md px-6">
           <h2 className="text-lg font-semibold mb-2">出错了</h2>
           <p className="text-sm text-muted-foreground mb-4">

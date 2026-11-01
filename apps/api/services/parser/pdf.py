@@ -34,6 +34,40 @@ def _sanitize_title(title: str) -> str:
     """Strip newlines, collapse whitespace, and truncate titles."""
     return clean_course_title(title)
 
+
+def _annotate_source_pages(nodes: list[CourseContentTree], file_path: str) -> None:
+    """Attach original PDF page numbers to parsed nodes when text can be matched.
+
+    Marker produces better document structure than pypdf but does not retain a
+    page coordinate.  A lightweight pypdf pass lets the source viewer reopen
+    the original PDF at the first page that contains a node's text.  A failed
+    match is intentionally omitted so legacy and scanned PDFs keep their
+    existing open-from-first-page behavior.
+    """
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(file_path, strict=False)
+        pages = [re.sub(r"\s+", "", page.extract_text() or "") for page in reader.pages]
+    except Exception as exc:  # Page linking is an enhancement, never an upload blocker.
+        logger.info("Skipping PDF page annotations for %s: %s", file_path, exc)
+        return
+
+    for node in nodes:
+        text = re.sub(r"\s+", "", node.content or "")
+        title = re.sub(r"\s+", "", node.title or "")
+        # Test several excerpts because a section can begin with a heading or
+        # extraction artefact that is absent from the PDF text layer.
+        excerpts = [text[index:index + 32] for index in range(0, max(0, min(len(text) - 23, 320)), 48)]
+        matched = [
+            number for number, page in enumerate(pages, start=1)
+            if (len(title) >= 4 and title in page)
+            or any(len(sample) >= 24 and sample in page for sample in excerpts)
+        ]
+        if matched:
+            metadata = dict(node.metadata_ or {})
+            metadata["source_pages"] = matched
+            node.metadata_ = metadata
+
 # Marker model singleton — avoids reloading ~1GB models on every call
 _marker_models: dict | None = None
 
@@ -1261,4 +1295,5 @@ async def parse_pdf_to_tree(
 
     # Build content tree
     nodes = _markdown_to_tree(markdown, course_id, source_file)
+    await asyncio.to_thread(_annotate_source_pages, nodes, file_path)
     return nodes

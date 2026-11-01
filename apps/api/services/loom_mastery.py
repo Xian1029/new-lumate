@@ -197,6 +197,37 @@ async def update_concept_mastery(
     return mastery
 
 
+async def update_content_node_mastery(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    course_id: uuid.UUID,
+    content_node_id: uuid.UUID,
+    correct: bool,
+    question_type: str | None = None,
+) -> int:
+    """Update concepts directly linked to a completed content node.
+
+    Generated questions can omit or mislabel knowledge points. The content
+    node is then the authoritative link, keeping exercise and graph progress
+    synchronized without guessing from question text.
+    """
+    result = await db.execute(
+        select(KnowledgeNode.id).where(
+            KnowledgeNode.course_id == course_id,
+            KnowledgeNode.content_node_id == content_node_id,
+        )
+    )
+    node_ids = result.scalars().all()
+    for node_id in node_ids:
+        await update_concept_mastery(
+            db, user_id, str(node_id), course_id,
+            correct=correct,
+            question_type=question_type,
+            content_node_id=content_node_id,
+        )
+    return len(node_ids)
+
+
 # ── Bidirectional FIRe: Fractional Implicit Repetitions (GKT + FIRe) ──
 
 async def _fire_propagate(

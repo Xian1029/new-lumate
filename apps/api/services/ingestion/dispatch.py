@@ -6,6 +6,7 @@ then triggers deadline extraction and auto-generation of learning content.
 
 import asyncio
 import logging
+import re
 
 import sqlalchemy as sa
 from sqlalchemy import select
@@ -31,7 +32,11 @@ async def dispatch_content(
     category = job.content_category or "other"
     source_name = (job.original_filename or "").lower()
     inferred_text_source = (
-        source_name.endswith((".md", ".txt", ".rst", ".html", ".htm", ".docx", ".doc", ".odt", ".rtf"))
+        # A readable file is learning material even when classification cannot
+        # confidently name its subject.  In particular, generic PDFs and
+        # question papers were previously classified as ``other`` / ``exam``
+        # and completed without a course tree.
+        source_name.endswith((".pdf", ".md", ".txt", ".rst", ".html", ".htm", ".docx", ".doc", ".odt", ".rtf", ".pptx", ".ppt"))
         or (job.mime_type or "").startswith("text/")
         or (job.mime_type or "").lower() in {
             "application/msword",
@@ -41,7 +46,7 @@ async def dispatch_content(
         or job.source_type == "url"
     )
 
-    if category in ("lecture_slides", "textbook", "notes", "syllabus") or (
+    if category in ("lecture_slides", "textbook", "notes", "syllabus", "assignment", "exam_schedule") or (
         category == "other" and inferred_text_source
     ):
         # Build content tree using PageIndex pattern
@@ -115,9 +120,17 @@ async def dispatch_content(
 
             for i, slide_content in enumerate(slide_chunks):
                 lines = slide_content.split("\n")
-                title = lines[0].lstrip("#").strip() if lines else f"Slide {i + 1}"
-                if not title or len(title) > 100:
-                    title = f"Slide {i + 1}"
+                # The extractor adds a technical ``## Slide N`` marker for
+                # boundaries. It is not useful to a learner as a directory
+                # title, so prefer the first real line of slide content.
+                visible_lines = [
+                    line.lstrip("#").strip(" -•\t")
+                    for line in lines
+                    if line.strip() and not re.match(r"^\s*#{0,6}\s*slide\s+\d+\s*$", line, re.IGNORECASE)
+                ]
+                title = visible_lines[0] if visible_lines else f"第 {i + 1} 页"
+                if len(title) > 80:
+                    title = title[:77].rstrip("，,、；;：: ") + "…"
                 child = CourseContentTree(
                     id=_uuid.uuid4(),
                     course_id=job.course_id,
@@ -228,7 +241,7 @@ async def dispatch_content(
         # flashcards and quizzes derived from those notes. Starting a second
         # raw-PDF generation task here caused unrelated and duplicate questions.
 
-    elif category == "assignment":
+    if category == "assignment":
         # Extract assignment info
         from services.ingestion.content_trimmer import trim_for_llm
 

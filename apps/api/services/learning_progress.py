@@ -66,7 +66,11 @@ def course_progress_snapshot(
     learnable = learnable_leaf_nodes(nodes)
     ids = {node.id for node in learnable}
     by_node = {row.content_node_id: row for row in progress_rows if row.content_node_id in ids}
-    completed = sum(1 for row in by_node.values() if row.status == "mastered")
+    # “已完成学习内容” means the lesson has been studied through its first
+    # review, not that every concept has reached long-term mastery. Counting
+    # only ``mastered`` made the lesson page and the home card disagree.
+    # Mastery remains a separate diagnostic/review signal.
+    completed = sum(1 for row in by_node.values() if row.status in {"reviewed", "mastered"})
     return CourseProgressSnapshot(learnable, by_node, completed, len(learnable))
 
 
@@ -75,9 +79,9 @@ def course_progress_view(snapshot: CourseProgressSnapshot) -> dict[str, int | No
 
     Home cards, the knowledge-graph path, and future course views must not
     recompute or rename completion numbers independently.  This view is based
-    only on the canonical snapshot: mastered learnable leaf nodes divided by
-    all learnable leaf nodes.  It deliberately excludes ingestion, task, and
-    mastery-quality percentages.
+    only on the canonical snapshot: reviewed or mastered learnable leaf nodes
+    divided by all learnable leaf nodes. It deliberately excludes ingestion,
+    task, and mastery-quality percentages.
     """
     return {
         "completed_learning_items": snapshot.completed_count,

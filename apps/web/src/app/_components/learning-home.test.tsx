@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { LearningHomeOverview } from "@/lib/api";
-import { FirstSpaceEmptyState, LearningSummary, PendingPlansSection, ProcessingSection, ReviewSection, SpacesSection, TodayTasksSection } from "./learning-home";
+import { DailyMomentum, FirstSpaceEmptyState, LearningSummary, PendingPlansSection, ProcessingSection, ReviewSection, SpacesSection, TodayTasksSection } from "./learning-home";
 
 const navigate = vi.fn();
 
@@ -68,5 +68,12 @@ describe("learning home protected features", () => {
     expect(screen.getByText("已完成 2 / 8 个学习内容，按内容数量加权计算。")).toBeInTheDocument();
     expect(screen.getByText("完成 2/8")).toBeInTheDocument();
     expect(screen.getByText("今日 1 项")).toBeInTheDocument();
+  });
+
+  it("uses the server workspace progress in the daily station when no task is scheduled today", () => {
+    render(<DailyMomentum overview={{ ...overview, today_summary: { estimated_minutes: 0, completed_count: 0, total_count: 0 } }} />);
+    expect(screen.getByText("课程完成度")).toBeInTheDocument();
+    expect(screen.getByText("已完成 2 个学习内容")).toBeInTheDocument();
+    expect(screen.getByText("共 8 个学习内容")).toBeInTheDocument();
   });
 });

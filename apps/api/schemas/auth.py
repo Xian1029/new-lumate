@@ -1,16 +1,16 @@
 """Auth request/response schemas."""
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 
 class RegisterRequest(BaseModel):
-    email: str = Field(..., min_length=3, max_length=255)
+    username: str = Field(..., min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_\-]+$")
     password: str = Field(..., min_length=8, max_length=128)
-    name: str = Field(default="User", max_length=100)
+    name: str | None = Field(default=None, max_length=100)
 
 
 class LoginRequest(BaseModel):
-    email: str
+    username: str
     password: str
 
 
@@ -18,15 +18,24 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+    user: "UserResponse | None" = None
 
 
 class UserResponse(BaseModel):
     id: str
     email: str | None
     name: str
+    username: str | None = None
+    role: str = "student"
+    must_change_password: bool = False
 
     model_config = {"from_attributes": True}

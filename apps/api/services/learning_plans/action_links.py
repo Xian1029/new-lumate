@@ -53,6 +53,7 @@ def build_action_href(
     course_id: uuid.UUID | str,
     content_node_id: uuid.UUID | str | None,
     node_exists: bool,
+    guided_session: bool = False,
 ) -> str:
     """Resolve the deepest *executable* route for a learning action.
 
@@ -70,6 +71,8 @@ def build_action_href(
     params = f"?module={module}"
     if node:
         params = f"?node={node}&module={module}"
+    if guided_session:
+        params += "&guided=1"
     return f"/course/{cid}{params}"
 
 

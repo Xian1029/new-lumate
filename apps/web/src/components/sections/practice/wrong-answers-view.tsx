@@ -41,7 +41,7 @@ const DIAGNOSIS_LABELS: Record<string, string> = {
   mastered: t("ui.mastered"),
 };
 
-function formatBadgeLabel(value: string): string {
+function formatBadgeLabel(): string {
   // 未知枚举兜底：返回中文占位，避免把内部英文枚举泄露给学生。
   return "待分类";
 }
@@ -84,12 +84,12 @@ function WrongAnswerRow({
             {item.question_type ? <Badge variant="outline">{questionTypeLabel(item.question_type, t)}</Badge> : null}
             {item.error_category ? (
               <Badge variant="secondary">
-                {CATEGORY_LABELS[item.error_category] ?? formatBadgeLabel(item.error_category)}
+                {CATEGORY_LABELS[item.error_category] ?? formatBadgeLabel()}
               </Badge>
             ) : null}
             {item.diagnosis ? (
               <Badge variant="secondary">
-                {DIAGNOSIS_LABELS[item.diagnosis] ?? formatBadgeLabel(item.diagnosis)}
+                {DIAGNOSIS_LABELS[item.diagnosis] ?? formatBadgeLabel()}
               </Badge>
             ) : null}
             <Badge variant="outline">已错 {item.wrong_attempt_count} 次</Badge>

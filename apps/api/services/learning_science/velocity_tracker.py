@@ -27,6 +27,7 @@ MASTERY_THRESHOLD = 0.8
 async def compute_velocity(
     db: AsyncSession,
     course_id: uuid.UUID,
+    user_id: uuid.UUID,
     *,
     window_days: int = 7,
 ) -> dict:
@@ -59,7 +60,10 @@ async def compute_velocity(
             func.avg(ConceptMastery.mastery_score),
         )
         .join(KnowledgeNode, ConceptMastery.knowledge_node_id == KnowledgeNode.id)
-        .where(KnowledgeNode.course_id == str(course_id))
+        .where(
+            KnowledgeNode.course_id == str(course_id),
+            ConceptMastery.user_id == user_id,
+        )
     )
     row = result.one()
     total = row[0] or 0
@@ -82,6 +86,7 @@ async def compute_velocity(
         select(MasterySnapshot)
         .where(
             MasterySnapshot.course_id == str(course_id),
+            MasterySnapshot.user_id == user_id,
             MasterySnapshot.recorded_at >= window_start,
         )
         .order_by(MasterySnapshot.recorded_at.asc())

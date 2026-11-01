@@ -20,10 +20,9 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     // from older builds so all screens and API requests use one locale.
     setI18nLocale("zh");
     document.documentElement.lang = "zh-CN";
-    setLocaleState("zh");
   }, []);
 
-  const setLocale = useCallback((_newLocale: Locale) => {
+  const setLocale = useCallback(() => {
     setI18nLocale("zh");
     document.documentElement.lang = "zh-CN";
     setLocaleState("zh");

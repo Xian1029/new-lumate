@@ -10,12 +10,14 @@ This module centralizes normalization of question metadata so every source of
 from dataclasses import dataclass
 import json
 import re
+import unicodedata
 import uuid
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
 
 from models.practice import PracticeProblem
+from services.content_text import has_unreadable_text
 
 VALID_QUESTION_TYPES = {
     "mc",
@@ -90,6 +92,75 @@ def _default_skill_focus(question_type: str) -> str:
 
 def _clean_string(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+_MOJIBAKE = re.compile(r"(?:Ã[\u0080-\u00ff]|Â[\u0080-\u00ff]|â[\u0080-\u00bf\u20ac\u2122])")
+_TEX_COMMAND = re.compile(r"\\(?:d?frac|sqrt|text|pm|times|cdot|dot|alpha|beta|pi|left|right)\b")
+_MATH_SPAN = re.compile(r"\$\$.*?\$\$|\$(?:\\.|[^$])*\$", re.DOTALL)
+_BARE_SIMPLE_TEX = re.compile(r"\\(?:d?frac)\{[^{}]+\}\{[^{}]+\}|\\sqrt\{[^{}]+\}")
+
+
+def normalize_formula_markup(value: str) -> str:
+    """Repair simple undelimited TeX without changing the mathematical value."""
+    text = value.replace(r"\(", "$").replace(r"\)", "$")
+    text = text.replace(r"\[", "$$").replace(r"\]", "$$")
+    parts = re.split(r"(\$\$.*?\$\$|\$(?:\\.|[^$])*\$)", text, flags=re.DOTALL)
+    return "".join(
+        part if index % 2 else _BARE_SIMPLE_TEX.sub(lambda match: f"${match.group(0)}$ ", part)
+        for index, part in enumerate(parts)
+    ).strip()
+
+
+def corrupted_question_fields(question: dict[str, Any]) -> list[str]:
+    """Find unmistakable encoding/font damage without rewriting maths text."""
+    fields: dict[str, Any] = {
+        "question": question.get("question"),
+        "correct_answer": question.get("correct_answer"),
+        "explanation": question.get("explanation"),
+    }
+    options = question.get("options")
+    if isinstance(options, dict):
+        fields.update({f"options.{key}": value for key, value in options.items()})
+    elif isinstance(options, list):
+        fields.update({f"options.{index}": value for index, value in enumerate(options)})
+    metadata = question.get("problem_metadata")
+    if isinstance(metadata, dict):
+        for key in ("core_concept", "source_section", "source_anchor", "skill_focus",
+                    "layer_justification", "potential_traps", "solution_steps",
+                    "common_mistake", "method_summary"):
+            fields[f"problem_metadata.{key}"] = metadata.get(key)
+    damaged = []
+    for name, value in fields.items():
+        if value is None:
+            continue
+        text = str(value)
+        if (has_unreadable_text(text) or _MOJIBAKE.search(text)
+                or any(unicodedata.category(char) == "Co" for char in text)
+                or any(ord(char) < 32 and char not in "\n\t\r" for char in text)):
+            damaged.append(name)
+    return damaged
+
+
+def unrenderable_math_fields(question: dict[str, Any]) -> list[str]:
+    """Detect TeX commands that would appear as literal source in practice."""
+    fields = {key: question.get(key) for key in ("question", "correct_answer", "explanation")}
+    options = question.get("options")
+    if isinstance(options, dict):
+        fields.update({f"options.{key}": value for key, value in options.items()})
+    elif isinstance(options, list):
+        fields.update({f"options.{index}": value for index, value in enumerate(options)})
+    broken = []
+    for name, value in fields.items():
+        if value is None:
+            continue
+        text = str(value).replace(r"\(", "$ ").replace(r"\)", " $")
+        text = text.replace(r"\[", "$$ ").replace(r"\]", " $$")
+        if not _TEX_COMMAND.search(text):
+            continue
+        dollar_count = len(re.findall(r"(?<!\\)\$", text))
+        if dollar_count % 2 or _TEX_COMMAND.search(_MATH_SPAN.sub("", text)):
+            broken.append(name)
+    return broken
 
 
 def _normalize_bloom_level(value: Any, question_type: str) -> str:
@@ -312,14 +383,18 @@ def normalize_problem_annotation(
     if not isinstance(traps, list):
         traps = []
 
-    normalized_question = _clean_string(question.get("question"))
+    normalized_question = normalize_formula_markup(_clean_string(question.get("question")))
     normalized_options = normalize_question_options(question.get("options"))
+    if normalized_options:
+        normalized_options = {key: normalize_formula_markup(value) for key, value in normalized_options.items()}
     if question_type == "tf":
         normalized_answer = _normalize_tf_answer(question.get("correct_answer"))
     elif question_type in {"mc", "select_all"}:
         normalized_answer = _normalize_mc_answer(question.get("correct_answer"), normalized_options)
     else:
         normalized_answer = _normalize_text_answer(question.get("correct_answer"))
+        if normalized_answer:
+            normalized_answer = normalize_formula_markup(normalized_answer)
 
     normalized_metadata = {
         "core_concept": _normalize_core_concept(
@@ -356,7 +431,7 @@ def normalize_problem_annotation(
         "question": normalized_question,
         "options": normalized_options,
         "correct_answer": normalized_answer,
-        "explanation": _normalize_text_answer(question.get("explanation")),
+        "explanation": normalize_formula_markup(_normalize_text_answer(question.get("explanation")) or "") or None,
         "difficulty_layer": difficulty_layer,
         "problem_metadata": normalized_metadata,
     }
@@ -384,6 +459,10 @@ def validate_question_payload(
     )
 
     errors: list[str] = []
+    for field_name in sorted(set(corrupted_question_fields(question) + corrupted_question_fields(normalized))):
+        errors.append(f"text_encoding: {field_name} contains unreadable characters")
+    for field_name in unrenderable_math_fields(normalized):
+        errors.append(f"math_markup: {field_name} contains an unrenderable formula")
     try:
         QuizQuestionContract.model_validate(normalized)
     except PydanticValidationError as exc:
@@ -473,6 +552,8 @@ def build_practice_problem(
     extra_metadata: dict[str, Any] | None = None,
 ) -> PracticeProblem:
     """Build a PracticeProblem using the shared annotation contract."""
+    if corrupted_question_fields(question):
+        raise ValueError("Generated question contains unreadable characters or formula markup")
     normalized = normalize_problem_annotation(
         question,
         title=title,
@@ -480,6 +561,8 @@ def build_practice_problem(
         difficulty_layer_default=difficulty_layer_default,
         extra_metadata=extra_metadata,
     )
+    if corrupted_question_fields(normalized) or unrenderable_math_fields(normalized):
+        raise ValueError("Generated question contains unreadable characters or formula markup")
 
     return PracticeProblem(
         course_id=course_id,

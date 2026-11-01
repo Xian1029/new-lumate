@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { FlashcardView } from "./flashcard-view";
 
 let testLocale = "en";
+const flashcardSession = vi.hoisted(() => ({ value: null as Record<string, unknown> | null }));
 
 function freshCards() {
   return [
@@ -58,7 +59,7 @@ vi.mock("@/components/shared/ai-feature-blocked", () => ({
 
 vi.mock("./use-quiz-persistence", () => {
   const save = vi.fn();
-  const load = vi.fn().mockReturnValue(null);
+  const load = vi.fn(() => flashcardSession.value);
   const clear = vi.fn();
   const subscribe = vi.fn().mockReturnValue(() => undefined);
   return {
@@ -71,6 +72,7 @@ describe("FlashcardView", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     testLocale = "en";
+    flashcardSession.value = null;
     const api = await import("@/lib/api");
     const practice = await import("@/lib/api/practice");
     (api.getDueFlashcards as ReturnType<typeof vi.fn>).mockResolvedValue({ cards: freshCards(), due_count: 2 });
@@ -119,6 +121,26 @@ describe("FlashcardView", () => {
     });
   });
 
+  it("links a course-wide due reminder to the flashcard review queue", async () => {
+    testLocale = "zh";
+    const api = await import("@/lib/api");
+    const practice = await import("@/lib/api/practice");
+    const offLessonCard = [{
+      id: "due-other-lesson",
+      front: "复习另一个章节",
+      back: "这是另一个章节的卡片答案",
+      content_node_id: "lesson-2",
+    }];
+    (api.getDueFlashcards as ReturnType<typeof vi.fn>).mockResolvedValue({ cards: offLessonCard, due_count: 1 });
+    (practice.getLectorOrderedFlashcards as ReturnType<typeof vi.fn>).mockResolvedValue({ cards: offLessonCard, count: 1 });
+
+    render(<FlashcardView courseId="test-course" />);
+
+    const reminder = await screen.findByRole("link", { name: "flashcard.cardsDueToday" });
+    expect(reminder).toHaveAttribute("href", "/course/test-course/practice?tab=review&scope=flashcards");
+    expect(screen.getByText("flashcard.empty")).toBeInTheDocument();
+  });
+
   it("has accessible flashcard button", async () => {
     render(<FlashcardView courseId="test-course" />);
     await waitFor(() => {
@@ -144,6 +166,38 @@ describe("FlashcardView", () => {
     fireEvent.keyDown(card, { key: "Enter" });
 
     expect(screen.getByRole("button", { name: /flashcard\.ariaAnswer/ })).toBeInTheDocument();
+  });
+
+  it("prepares a non-duplicate new set when reopening a completed flashcard session", async () => {
+    flashcardSession.value = {
+      index: 2,
+      reviewedCount: 2,
+      cards: freshCards(),
+    };
+    const api = await import("@/lib/api");
+    (api.generateFlashcards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      cards: [{
+        id: "c3",
+        front: "What is 3+3?",
+        back: "6",
+        interval: 1,
+        ease_factor: 2.5,
+        repetitions: 0,
+        content_node_id: "lesson-1",
+      }],
+      count: 1,
+    });
+
+    render(<FlashcardView courseId="test-course" />);
+
+    await waitFor(() => expect(screen.getByText("What is 3+3?")).toBeInTheDocument());
+    expect(api.generateFlashcards).toHaveBeenCalledWith(
+      "test-course",
+      5,
+      "self_paced",
+      ["What is 2+2?", "Capital of France?"],
+      "lesson-1",
+    );
   });
 
   it("shows rating buttons after flip", async () => {

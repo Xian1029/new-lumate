@@ -60,7 +60,13 @@ def _safe_number(node: ast.AST) -> float:
 
 
 def _parse_numeric_answer(value: str) -> tuple[float, str | None] | None:
-    text = unicodedata.normalize("NFKC", str(value or "")).strip().lower()
+    raw_text = str(value or "").strip()
+    # Answer keys sometimes prefix each blank with a circled number (``①``),
+    # purely to make a multi-part answer easier to read.  NFKC turns ``①``
+    # into ``1``; without removing it first, ``①1.2kg`` becomes ``11.2kg``
+    # and a correct learner answer of ``1.2kg`` is marked wrong.
+    raw_text = re.sub(r"^(?:[①-⑳⑴-⒇]|[（(]\s*\d{1,2}\s*[)）])\s*", "", raw_text)
+    text = unicodedata.normalize("NFKC", raw_text).strip().lower()
     text = text.replace("×", "*").replace("÷", "/").replace("^", "**").replace("−", "-")
     match = _UNIT_SUFFIX.search(text)
     unit = None
@@ -240,6 +246,89 @@ def signed_quantities_equivalent(user_answer: str, correct_answer: str) -> bool:
     # Explanations commonly repeat a quantity while showing a calculation.
     # Repetition is presentation, not an additional required answer.
     return len(user_values) >= 2 and set(user_values) == set(correct_values)
+
+
+def signed_offsets_with_total_relation_equivalent(user_answer: str, correct_answer: str) -> bool:
+    """Accept equivalent answers that distinguish offsets from actual totals.
+
+    A common K12 prompt first asks for two signed deviations, then asks for
+    their sum and finally for the corresponding actual total. Learners often
+    write ``和为100kg`` to mean the *two bags' actual total*, followed by an
+    explicit statement that this equals two standard bags. Treating that 100
+    as the deviation sum is a quantity-name error in the grader, not a maths
+    error by the learner. This rule remains strict about both signs, any
+    explicitly stated deviation sum, and any stated actual total.
+    """
+    user = _normalize_math_text(user_answer)
+    expected = _normalize_math_text(correct_answer)
+    relation_words = ("相等", "等于", "一样", "正好是", "正好等于")
+    total_words = ("总质量", "合计", "两袋", "2袋")
+
+    def has_total_relation(value: str) -> bool:
+        return (
+            "标准" in value
+            and any(word in value for word in relation_words)
+            and any(word in value for word in total_words)
+        )
+
+    if not has_total_relation(expected) or not has_total_relation(user):
+        return False
+
+    number = r"(?:\d+(?:\.\d*)?|\.\d+)"
+
+    def explicit_expected_offsets(value: str) -> set[float]:
+        return {
+            float(token.replace(" ", ""))
+            for token in re.findall(rf"(?<![A-Za-z0-9.])([+\-]\s*{number})(?![A-Za-z0-9.])", value)
+        }
+
+    def learner_offsets(value: str) -> set[float] | None:
+        offsets: set[float] = set()
+        for clause in re.split(r"[，,；;。\n]+", value):
+            is_more = bool(re.search(r"多|超出|超过|高于", clause))
+            is_less = bool(re.search(r"少|不足|低于", clause))
+            if not is_more and not is_less:
+                continue
+            representation = clause.split("记为", 1)[1] if "记为" in clause else clause
+            values = re.findall(rf"(?<![A-Za-z0-9.])([+\-]?\s*{number})\s*(?:kg|千克|公斤)?", representation, re.IGNORECASE)
+            if not values:
+                continue
+            raw = values[0].replace(" ", "")
+            parsed = float(raw)
+            if "记为" not in clause:
+                parsed = abs(parsed) if is_more else -abs(parsed)
+            elif (is_more and parsed < 0) or (is_less and parsed >= 0):
+                return None
+            offsets.add(parsed)
+        return offsets
+
+    expected_offsets = explicit_expected_offsets(expected)
+    user_offsets = learner_offsets(user)
+    if len(expected_offsets) < 2 or user_offsets != expected_offsets:
+        return False
+
+    # An explicitly named deviation sum must still be zero. A bare
+    # ``和为100kg`` followed by a total-mass equality is interpreted as the
+    # actual total, matching ordinary student wording.
+    wrong_deviation_sum = re.search(
+        rf"(?:差|差值|偏差|超差).{{0,10}}(?:和|相加|合计).{{0,6}}(?:为|等于|是)?\s*(?![+\-]?0(?:\.0+)?(?:\D|$))[+\-]?{number}",
+        user,
+    )
+    if wrong_deviation_sum:
+        return False
+
+    def stated_large_mass(value: str) -> set[float]:
+        return {
+            float(raw)
+            for raw in re.findall(rf"(?<![\d.])({number})\s*(?:kg|千克|公斤)", value, re.IGNORECASE)
+            if float(raw) >= 10
+        }
+
+    expected_totals = stated_large_mass(expected)
+    user_totals = stated_large_mass(user)
+    if user_totals and expected_totals and user_totals != expected_totals:
+        return False
+    return True
 
 
 def named_quantities_with_classification_equivalent(user_answer: str, correct_answer: str) -> bool:

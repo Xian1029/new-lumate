@@ -1,0 +1,5 @@
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { changePassword } from "@/lib/account";
+export default function ChangePasswordPage(){const r=useRouter();const [old,setOld]=useState("");const [next,setNext]=useState("");const [error,setError]=useState("");const submit=async(e:React.FormEvent)=>{e.preventDefault();try{await changePassword(old,next);r.replace('/')}catch(e){setError(e instanceof Error?e.message:"修改失败")}};return <main className="grid min-h-screen place-items-center bg-background p-5"><form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-2xl border bg-card p-7"><h1 className="text-2xl font-bold">设置新密码</h1><p className="text-sm text-muted-foreground">首次登录后请设置新密码，无需再次填写初始密码。</p><input required minLength={8} type="password" placeholder="新密码（至少 8 位）" value={next} onChange={e=>setNext(e.target.value)} className="w-full rounded-lg border p-3"/>{error&&<p className="text-sm text-destructive">{error}</p>}<button className="w-full rounded-lg bg-brand p-3 font-semibold text-brand-foreground">保存新密码</button></form></main>}

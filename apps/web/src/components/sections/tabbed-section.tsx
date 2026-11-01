@@ -24,6 +24,8 @@ interface TabbedSectionProps<T extends string> {
   /** External override — when set, the tab switches to this value and the prop is cleared. */
   externalTab?: T | null;
   onExternalTabConsumed?: () => void;
+  /** Called for a user-initiated tab switch, with the tab that was visible before it. */
+  onTabChange?: (nextTab: T, previousTab: T) => void;
   children: (activeTab: T) => ReactNode;
 }
 
@@ -33,6 +35,7 @@ export function TabbedSection<T extends string>({
   testId,
   externalTab,
   onExternalTabConsumed,
+  onTabChange,
   children,
 }: TabbedSectionProps<T>) {
   const [activeTab, setActiveTab] = useState<T>(defaultTab);
@@ -62,6 +65,7 @@ export function TabbedSection<T extends string>({
               data-testid={tab.testId}
               onClick={() => {
                 if (externalCandidate) onExternalTabConsumed?.();
+                onTabChange?.(tab.id, resolvedActiveTab);
                 setActiveTab(tab.id);
               }}
             >

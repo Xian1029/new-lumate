@@ -9,7 +9,7 @@ from datetime import date, datetime, timezone
 import uuid
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -76,14 +76,18 @@ def _task_href(task: LearningTask, existing_nodes: set[uuid.UUID]) -> str:
             course_id=task.course_id,
             content_node_id=task.content_node_id,
             node_exists=task.content_node_id in existing_nodes,
+            guided_session=True,
         )
-    if task.action_href:
-        return task.action_href
+    # ``action_href`` is retained for backwards compatibility and display,
+    # but it may point at an old standalone notes/unit page.  A plan action
+    # must always enter the course workspace so the guided-session contract
+    # (mode, selected chapter and executable blocks) stays intact.
     return build_action_href(
         task_type=task.task_type,
         course_id=task.course_id,
         content_node_id=None,
         node_exists=False,
+        guided_session=True,
     )
 
 
@@ -99,11 +103,98 @@ async def _existing_node_ids(db: AsyncSession, tasks: list[LearningTask]) -> set
 
 
 async def _review_queue(db: AsyncSession, user_id: uuid.UUID, courses: list[Course]) -> list[dict]:
-    """Aggregate existing LECTOR results server-side, once per learning space."""
+    """Build one home review queue from the same due cards shown in review.
+
+    A card that appears as "today due" must open a place where it can be
+    confirmed.  Concept recommendations remain a fallback for courses that
+    have no persisted flashcards yet.
+    """
     from services.lector import get_smart_review_session
+    from models.generated_asset import GeneratedAsset
+    from services.spaced_repetition.flashcards import is_flashcard_due
+
+    course_ids = [course.id for course in courses]
+
+    # A course may have its graph and its flashcards generated immediately
+    # after upload.  Those generated resources are *learning material*, not
+    # evidence that the learner has something to review.  Restrict the
+    # concept-review fallback to courses where a user has actually answered a
+    # question or confirmed a review.  This keeps a 0 / N course from being
+    # labelled "待复习" merely because its content finished processing.
+    reviewed_course_ids: set[uuid.UUID] = set()
+    if course_ids:
+        progress_rows = (await db.execute(
+            select(LearningProgress.course_id).where(
+                LearningProgress.user_id == user_id,
+                LearningProgress.course_id.in_(course_ids),
+                or_(
+                    LearningProgress.review_count > 0,
+                    LearningProgress.quiz_attempts > 0,
+                    LearningProgress.fsrs_reps > 0,
+                    LearningProgress.status.in_(("reviewed", "mastered")),
+                ),
+            )
+        )).scalars().all()
+        reviewed_course_ids = set(progress_rows)
+
+    def is_review_due_card(card: dict) -> bool:
+        """Exclude untouched new cards from the home *review* reminder.
+
+        ``is_flashcard_due`` deliberately treats a new card as due so it is
+        available in the card-learning flow.  The home queue has a narrower
+        meaning: it promises cards the learner has seen before and can now
+        confirm as reviewed.
+        """
+        fsrs = card.get("fsrs") or {}
+        if not isinstance(fsrs, dict):
+            return False
+        try:
+            reps = int(fsrs.get("reps") or 0)
+        except (TypeError, ValueError):
+            reps = 0
+        return (reps > 0 or bool(fsrs.get("last_review"))) and is_flashcard_due(card)
+
+    assets_by_course: dict[uuid.UUID, list[GeneratedAsset]] = {}
+    if course_ids:
+        assets = list((await db.execute(
+            select(GeneratedAsset).where(
+                GeneratedAsset.user_id == user_id,
+                GeneratedAsset.course_id.in_(course_ids),
+                GeneratedAsset.asset_type == "flashcards",
+                GeneratedAsset.is_archived == False,  # noqa: E712
+            )
+        )).scalars().all())
+        for asset in assets:
+            if asset.course_id:
+                assets_by_course.setdefault(asset.course_id, []).append(asset)
 
     queue: list[dict] = []
     for course in courses:
+        due_cards = [
+            card
+            for asset in assets_by_course.get(course.id, [])
+            for card in (asset.content or {}).get("cards", [])
+            if isinstance(card, dict) and is_review_due_card(card)
+        ]
+        if due_cards:
+            first_points = due_cards[0].get("knowledge_points") or []
+            if isinstance(first_points, str):
+                first_points = [first_points]
+            queue.append({
+                "course_id": str(course.id),
+                "course_name": course.name,
+                "count": len(due_cards),
+                "estimated_minutes": max(1, len(due_cards)),
+                "highest_priority_knowledge": str(first_points[0]) if first_points else "闪卡复盘",
+                "priority": 10_000 + len(due_cards),
+                "review_kind": "flashcards",
+                "href": f"/course/{course.id}/practice?tab=review&scope=flashcards",
+            })
+            continue
+        # Do not let concept extraction create an artificial review task for
+        # a learner who has not started this course yet.
+        if course.id not in reviewed_course_ids:
+            continue
         items = await get_smart_review_session(db, user_id, course.id, max_items=10)
         if not items:
             continue
@@ -115,6 +206,7 @@ async def _review_queue(db: AsyncSession, user_id: uuid.UUID, courses: list[Cour
             "estimated_minutes": len(items) * 3,
             "highest_priority_knowledge": top.concept_name,
             "priority": top.priority,
+            "review_kind": "knowledge",
             "href": f"/course/{course.id}/review",
         })
     return sorted(queue, key=lambda item: item["priority"], reverse=True)
@@ -175,9 +267,9 @@ def _workspace_progress_view_model(
 
     ``mastery_score`` intentionally does not participate in ``progress_percent``:
     mastery measures answer quality, while a card's progress must communicate
-    how much of the course the learner has completed.  We can make that claim
-    only for leaf, learnable content nodes that have a ``mastered`` progress
-    record.
+    how much of the course the learner has completed. A leaf counts after its
+    first completed review or when it is mastered; those states remain
+    distinct for diagnostics and future review recommendations.
     """
     from services.learning_plans.action_links import build_resume_href
 
@@ -349,28 +441,69 @@ async def learning_home_overview(user: User = Depends(get_current_user), db: Asy
     current_task = next((task for task in active_tasks if task.status == LearningTaskStatus.IN_PROGRESS.value), None)
     next_task = current_task or (today_tasks[0] if today_tasks else (active_tasks[0] if active_tasks else None))
     existing_nodes = await _existing_node_ids(db, active_tasks)
+    course_names = {course.id: course.name for course in courses}
+    plan_titles = {plan.id: plan.title for plan in plans}
+    calendar_items = [
+        {
+            "id": f"task:{task.id}", "plan_id": str(task.plan_id),
+            "course_id": str(task.course_id), "course_name": course_names.get(task.course_id, "学习空间"),
+            "plan_title": plan_titles.get(task.plan_id, "学习计划"),
+            "title": task.title, "date": effective_date.isoformat(),
+            "item_type": "TASK", "status": task.status,
+            "estimated_minutes": task.estimated_minutes, "href": _task_href(task, existing_nodes),
+        }
+        for task in active_tasks
+        if (effective_date := _effective_task_date(task)) is not None
+    ]
+    calendar_items.extend({
+        "id": f"plan:{plan.id}", "plan_id": str(plan.id),
+        "course_id": str(plan.course_id), "course_name": course_names.get(plan.course_id, "学习空间"),
+        "title": plan.title, "date": plan.target_date.isoformat(),
+        "item_type": "PLAN_TARGET", "status": plan.status,
+        "estimated_minutes": plan.total_estimated_minutes, "href": f"/learning-plans/{plan.id}",
+    } for plan in plans if plan.target_date is not None and plan.status in {"ACTIVE", "PAUSED"})
+    calendar_items.sort(key=lambda item: (item["date"], item["item_type"], item["title"]))
 
-    from services.learning_plans.action_links import cta_label_for_module, module_for_task_type
+    from services.learning_plans.action_links import module_for_task_type
+
+    def task_action(task: LearningTask) -> dict:
+        target_module = module_for_task_type(task.task_type)
+        return {
+            "course_id": str(task.course_id),
+            "course_name": course_names.get(task.course_id, "学习空间"),
+            "content_node_id": str(task.content_node_id) if task.content_node_id else None,
+            "knowledge_point_id": task.knowledge_point_id,
+            "learning_task_id": str(task.id),
+            "plan_id": str(task.plan_id),
+            "action_type": task.task_type,
+            "target_module": target_module,
+            "title": task.title,
+            "instruction": task.instruction,
+            # The home card is a continuation entry for the active learning
+            # plan.  Its label stays stable even when the next task happens
+            # to be practice or review; the structured deep link still opens
+            # that task's exact module.
+            "action_text": "继续学习",
+            "reason": task.instruction or "按学习计划完成当前任务。",
+            "href": _task_href(task, existing_nodes),
+        }
+
+    # Keep one immediately actionable reminder per learning space. The global
+    # ordering still decides priority, while this grouping prevents a recently
+    # updated plan from hiding every other space on the home page.
+    reminder_candidates = today_tasks or active_tasks
+    reminder_tasks_by_course: list[LearningTask] = []
+    seen_reminder_courses: set[uuid.UUID] = set()
+    for task in reminder_candidates:
+        if task.course_id in seen_reminder_courses:
+            continue
+        seen_reminder_courses.add(task.course_id)
+        reminder_tasks_by_course.append(task)
+    current_action_count = len(reminder_tasks_by_course)
+    current_actions = [task_action(task) for task in reminder_tasks_by_course[:4]]
 
     if next_task:
-        target_module = module_for_task_type(next_task.task_type)
-        current_action: dict | None = {
-            "course_id": str(next_task.course_id),
-            "content_node_id": str(next_task.content_node_id) if next_task.content_node_id else None,
-            "knowledge_point_id": next_task.knowledge_point_id,
-            "learning_task_id": str(next_task.id),
-            "plan_id": str(next_task.plan_id),
-            "action_type": next_task.task_type,
-            "target_module": target_module,
-            "title": next_task.title,
-            "instruction": next_task.instruction,
-            "action_text": (
-                "继续学习" if next_task.status == LearningTaskStatus.IN_PROGRESS.value
-                else cta_label_for_module(target_module)
-            ),
-            "reason": next_task.instruction or "按学习计划完成当前任务。",
-            "href": _task_href(next_task, existing_nodes),
-        }
+        current_action: dict | None = task_action(next_task)
     else:
         # Preserve the existing server-owned recommendation for learners who do
         # not yet have an active LearningTask.
@@ -390,6 +523,7 @@ async def learning_home_overview(user: User = Depends(get_current_user), db: Asy
             "reason": fallback.recommended_action,
             "href": fallback.href,
         }
+    current_action_is_resume_fallback = False
 
     progress_rows = list((await db.execute(
         select(LearningProgress).where(LearningProgress.user_id == user.id)
@@ -536,6 +670,7 @@ async def learning_home_overview(user: User = Depends(get_current_user), db: Asy
             "reason": f"上次学到「{title}」，从这里继续最连贯。",
             "href": recent_learning["href"],
         }
+        current_action_is_resume_fallback = True
     elif next_task is None and current_action and current_action.get("course_id"):
         # Legacy recommendation records can still carry a title/link to a
         # parsed table of contents.  They remain readable history, but may not
@@ -598,9 +733,50 @@ async def learning_home_overview(user: User = Depends(get_current_user), db: Asy
     )
     review_due_count = sum(item["count"] for item in review_queue)
     learning_summary_progress = aggregate_course_progress_views(learning_spaces)
+    if not reminder_tasks_by_course:
+        # No active-plan task is due: keep the most recent/resolved action as
+        # the primary card, then offer one safe resume/start entry for every
+        # other learning space with material. This prevents the fallback path
+        # from making a multi-space home look like it only has one course.
+        fallback_actions: list[dict] = []
+        seen_fallback_courses: set[str] = set()
+        if current_action:
+            course_id = str(current_action.get("course_id") or "")
+            if course_id:
+                try:
+                    current_action.setdefault("course_name", course_names.get(uuid.UUID(course_id), "学习空间"))
+                except ValueError:
+                    current_action.setdefault("course_name", "学习空间")
+                seen_fallback_courses.add(course_id)
+            fallback_actions.append(current_action)
+        for space in learning_spaces:
+            course_id = space["id"]
+            if course_id in seen_fallback_courses or not space["total_learning_items"]:
+                continue
+            seen_fallback_courses.add(course_id)
+            title = space["current_node_title"] or "从下一项学习内容开始"
+            fallback_actions.append({
+                "course_id": course_id,
+                "course_name": space["name"],
+                "content_node_id": None,
+                "knowledge_point_id": None,
+                "learning_task_id": None,
+                "action_type": "RESUME" if space["current_node_title"] else "START",
+                "target_module": "CONTENT",
+                "title": f"{'继续学习' if space['current_node_title'] else '开始学习'}：{title}",
+                "instruction": space["current_node_title"] or "从该学习空间的第一项内容开始。",
+                "action_text": space["action_label"],
+                "reason": "回到这个学习空间，继续完成当前学习内容。",
+                "href": space["target_route"],
+            })
+        current_action_count = len(fallback_actions)
+        current_actions = fallback_actions[:4]
 
     return {
         "current_learning_action": current_action,
+        "current_learning_actions": current_actions,
+        "current_learning_action_count": current_action_count,
+        "current_learning_action_is_resume_fallback": current_action_is_resume_fallback,
         "draft_learning_plans": draft_plans,
         "pending_learning_plans": pending_plans,
         "today_tasks": [
@@ -616,6 +792,7 @@ async def learning_home_overview(user: User = Depends(get_current_user), db: Asy
             "completed_count": completed_today,
             "total_count": completed_today + len(today_tasks),
         },
+        "calendar_items": calendar_items,
         "learning_spaces": learning_spaces,
         "processing_uploads": processing_uploads,
         "review_queue": review_queue,

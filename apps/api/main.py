@@ -70,7 +70,10 @@ def _configure_middleware(app: FastAPI) -> None:
     app.add_middleware(SecurityHeadersMiddleware)
 
     # CSRF protection (outermost security layer)
-    if settings.environment == "production" or settings.auth_enabled:
+    # Lumate's local multi-user MVP uses same-origin, HttpOnly server sessions
+    # and deliberately keeps the login flow simple.  CSRF can be enabled by a
+    # production reverse-proxy deployment when cookie-auth hardening is needed.
+    if settings.environment == "production":
         from middleware.csrf import CSRFMiddleware
         app.add_middleware(CSRFMiddleware)
 

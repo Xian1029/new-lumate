@@ -175,11 +175,10 @@ async def start_learning_plan(plan_id: uuid.UUID, user: User = Depends(get_curre
     if task.content_node_id:
         node_exists = (await db.execute(select(CourseContentTree.id).where(CourseContentTree.id == task.content_node_id))).scalar_one_or_none() is not None
     from services.learning_plans.action_links import build_action_href, module_for_task_type
-    href = build_action_href(task_type=task.task_type, course_id=task.course_id, content_node_id=task.content_node_id, node_exists=node_exists)
-    # Structured data is authoritative.  A legacy href is only used for old
-    # node-less tasks where it remains a valid course-owned route.
-    if not task.content_node_id and task.action_href:
-        href = task.action_href
+    href = build_action_href(task_type=task.task_type, course_id=task.course_id, content_node_id=task.content_node_id, node_exists=node_exists, guided_session=True)
+    # Structured task fields are authoritative.  Legacy action_href values
+    # can lead to an isolated notes/unit page, which loses the plan's guided
+    # workspace context when a task has no node yet.
     await db.commit()
     await db.refresh(plan); await db.refresh(task)
     return StartLearningPlanResponse(plan=_plan_response(plan), task=_task_response(task), href=href, target_module=module_for_task_type(task.task_type), relocated=bool(task.content_node_id and not node_exists))

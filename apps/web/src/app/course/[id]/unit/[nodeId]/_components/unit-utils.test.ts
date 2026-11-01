@@ -20,8 +20,9 @@ describe("unit next-step evidence", () => {
   });
 
   it("only recommends review when there are actually urgent review items", () => {
-    expect(getNextLearningAction({ urgentReviewCount: 0, wrongAnswerCount: 0, errorTrend: { recent7d: 0, previous7d: 0, delta: 0, direction: "flat" } })).toBe("practice");
-    expect(getNextLearningAction({ urgentReviewCount: 2, wrongAnswerCount: 0, errorTrend: { recent7d: 0, previous7d: 0, delta: 0, direction: "flat" } })).toBe("review");
+    expect(getNextLearningAction({ urgentReviewCount: 0, activeWrongAnswerCount: 0, errorTrend: { recent7d: 0, previous7d: 0, delta: 0, direction: "flat" } })).toBe("practice");
+    expect(getNextLearningAction({ urgentReviewCount: 0, activeWrongAnswerCount: 1, errorTrend: { recent7d: 0, previous7d: 0, delta: 0, direction: "flat" } })).toBe("targeted_practice");
+    expect(getNextLearningAction({ urgentReviewCount: 2, activeWrongAnswerCount: 0, errorTrend: { recent7d: 0, previous7d: 0, delta: 0, direction: "flat" } })).toBe("review");
   });
 
   it("groups recurring mistakes by real knowledge evidence without labeling one miss as recurring", () => {

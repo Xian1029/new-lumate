@@ -21,7 +21,7 @@ from services.content_text import normalize_pdf_markdown
 logger = logging.getLogger(__name__)
 
 # Office formats handled by loader_dict (GPT-Researcher pattern)
-OFFICE_EXTENSIONS = {"doc", "docx", "pptx", "csv", "xls", "xlsx"}
+OFFICE_EXTENSIONS = {"doc", "docx", "ppt", "pptx", "csv", "xls", "xlsx"}
 
 # Text formats read directly
 TEXT_EXTENSIONS = {"txt", "md", "rst"}
@@ -86,10 +86,13 @@ async def _extract_local_with_crawl4ai(file_path: str) -> tuple[str, str]:
     if ext in ("html", "htm"):
         return await asyncio.to_thread(_extract_html_fallback, file_path)
 
-    if ext in ("docx", "doc"):
+    if ext == "doc":
+        return await asyncio.to_thread(_extract_legacy_office_text, file_path)
+
+    if ext == "docx":
         return await asyncio.to_thread(_extract_docx_fallback, file_path)
 
-    if ext == "pptx":
+    if ext in ("ppt", "pptx"):
         return await asyncio.to_thread(_extract_pptx_fallback, file_path)
 
     if ext == "xlsx":
@@ -145,7 +148,8 @@ def _extract_pdf_fallback(file_path: str) -> tuple[str, str]:
     # Try pypdf
     try:
         import pypdf
-        from pypdf.errors import PyPdfError
+        from pypdf.errors import LimitReachedError, PyPdfError
+        from pypdf._configuration import apply_configuration
 
         reader = pypdf.PdfReader(file_path, strict=False)
         page_texts: list[str] = []
@@ -156,6 +160,32 @@ def _extract_pdf_fallback(file_path: str) -> tuple[str, str]:
                 page = reader.pages[page_index]
                 _resolve_pypdf_font_widths(page)
                 page_texts.append(page.extract_text() or "")
+            except LimitReachedError as exc:
+                # Some otherwise valid textbook pages contain a very large
+                # vector drawing. pypdf's default operation budget protects
+                # uploads from pathological files, but can reject those pages
+                # before their text is reached. Retry this page only with a
+                # bounded, doubled budget; all other safety limits remain in
+                # force and a second failure is still reported as unreadable.
+                try:
+                    with apply_configuration(stream_parsing_work_maximum_count=4_000_000):
+                        page = reader.pages[page_index]
+                        _resolve_pypdf_font_widths(page)
+                        page_texts.append(page.extract_text() or "")
+                    logger.info(
+                        "Recovered PDF page %s in %s after raising the bounded parse budget: %s",
+                        page_number,
+                        Path(file_path).name,
+                        exc,
+                    )
+                except (PyPdfError, ValueError, KeyError, TypeError, AttributeError) as retry_error:
+                    unreadable_pages.append(page_number)
+                    logger.warning(
+                        "Skipping unreadable page %s in %s after bounded retry: %s",
+                        page_number,
+                        Path(file_path).name,
+                        retry_error,
+                    )
             except (PyPdfError, ValueError, KeyError, TypeError, AttributeError) as e:
                 # A malformed page box or indirect PDF object must not make an
                 # otherwise readable textbook fail in its entirety.
@@ -315,6 +345,7 @@ def _extract_with_loader_dict(file_path: str, ext: str) -> tuple[str, str]:
         loader_map = {
             "doc": lambda fp: UnstructuredWordDocumentLoader(fp),
             "docx": lambda fp: UnstructuredWordDocumentLoader(fp),
+            "ppt": lambda fp: UnstructuredPowerPointLoader(fp),
             "pptx": lambda fp: UnstructuredPowerPointLoader(fp),
             "csv": lambda fp: UnstructuredCSVLoader(fp, mode="elements"),
             "xls": lambda fp: UnstructuredExcelLoader(fp, mode="elements"),
@@ -338,7 +369,11 @@ def _extract_with_loader_dict(file_path: str, ext: str) -> tuple[str, str]:
             ext,
         )
         return _extract_office_fallback(file_path, ext)
-    except (OSError, ValueError, RuntimeError) as e:
+    except Exception as e:
+        # Optional Unstructured integrations can raise parser-specific errors
+        # (for example malformed ZIP/OLE containers).  A bad optional parser
+        # must not abort the upload; the format-specific reader below either
+        # extracts what it can or returns an explicit source-view fallback.
         logger.warning("loader_dict extraction failed for %s: %s", file_path, e)
         return _extract_office_fallback(file_path, ext)
 
@@ -348,8 +383,12 @@ def _extract_office_fallback(file_path: str, ext: str) -> tuple[str, str]:
 
     Routes to dedicated extractors for each format.
     """
-    if ext in ("doc", "docx"):
+    if ext == "doc":
+        return _extract_legacy_office_text(file_path)
+    if ext == "docx":
         return _extract_docx_fallback(file_path)
+    if ext == "ppt":
+        return _extract_legacy_office_text(file_path)
     if ext == "pptx":
         return _extract_pptx_fallback(file_path)
     if ext == "xlsx":
@@ -357,6 +396,34 @@ def _extract_office_fallback(file_path: str, ext: str) -> tuple[str, str]:
     if ext == "csv":
         return _extract_csv_fallback(file_path)
     return Path(file_path).stem, ""
+
+
+def _extract_legacy_office_text(file_path: str) -> tuple[str, str]:
+    """Best-effort text recovery for binary ``.doc`` and ``.ppt`` files.
+
+    Legacy Office documents use an OLE container, so python-docx/python-pptx
+    cannot read them. This fallback keeps a valid upload usable when optional
+    legacy loaders are unavailable, extracting readable text runs only.
+    """
+    title = Path(file_path).stem
+    try:
+        raw = Path(file_path).read_bytes()
+    except OSError as exc:
+        logger.warning("Could not read legacy Office file %s: %s", file_path, exc)
+        return title, ""
+
+    candidates = [raw.decode("utf-16le", errors="ignore"), raw.decode("utf-8", errors="ignore"), raw.decode("gb18030", errors="ignore")]
+    runs: list[str] = []
+    for candidate in candidates:
+        candidate = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]+", " ", candidate)
+        for run in re.findall(r"[\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9，。；：、（）()【】\-—,.!?！？%+*/=\\s]{7,}", candidate):
+            cleaned = re.sub(r"\s+", " ", run).strip()
+            if cleaned and cleaned not in runs:
+                runs.append(cleaned)
+    text = "\n\n".join(runs[:500])
+    if text:
+        return title, text
+    return title, f"# {title}\n\n此旧版 Office 文件已保存，但暂未提取到可读正文。请在原文件中查看内容后重试导出为 DOCX 或 PPTX。"
 
 
 def _extract_docx_fallback(file_path: str) -> tuple[str, str]:
@@ -394,10 +461,10 @@ def _extract_docx_fallback(file_path: str) -> tuple[str, str]:
         return Path(file_path).stem, "\n\n".join(parts)
     except ImportError:
         logger.debug("python-docx not installed for DOCX extraction of %s", file_path)
-    except (OSError, ValueError, KeyError) as e:
+    except Exception as e:
         logger.warning("DOCX extraction failed for %s: %s", Path(file_path).name, e)
 
-    return Path(file_path).stem, ""
+    return _extract_legacy_office_text(file_path)
 
 
 def _extract_pptx_fallback(file_path: str) -> tuple[str, str]:
@@ -439,10 +506,10 @@ def _extract_pptx_fallback(file_path: str) -> tuple[str, str]:
         return Path(file_path).stem, "\n\n---\n\n".join(parts)
     except ImportError:
         logger.debug("python-pptx not installed for PPTX extraction of %s", file_path)
-    except (OSError, ValueError, KeyError) as e:
+    except Exception as e:
         logger.warning("PPTX extraction failed for %s: %s", Path(file_path).name, e)
 
-    return Path(file_path).stem, ""
+    return _extract_legacy_office_text(file_path)
 
 
 def _extract_xlsx_fallback(file_path: str) -> tuple[str, str]:
@@ -584,10 +651,17 @@ def _table_to_markdown(rows: list[list[str]]) -> str:
 
 
 def _extract_plain_text(file_path: str) -> tuple[str, str]:
-    """Direct text read for .txt, .md, .rst, and unknown files."""
+    """Direct text read with UTF-8/UTF-16/GB-family fallback for TXT files."""
     try:
-        content = Path(file_path).read_text(errors="ignore")
-        return Path(file_path).stem, content
+        raw = Path(file_path).read_bytes()
+        for encoding in ("utf-8-sig", "utf-16", "gb18030", "big5"):
+            try:
+                content = raw.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+            if content.strip():
+                return Path(file_path).stem, content
+        return Path(file_path).stem, raw.decode("utf-8", errors="ignore")
     except OSError as e:
         logger.exception("Failed to read plain text file %s", file_path)
         return Path(file_path).stem, ""

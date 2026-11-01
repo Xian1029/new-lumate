@@ -19,7 +19,10 @@ from services.loom_graph import get_mastery_graph
 
 
 def _status_from_mastery(mastery: float) -> str:
-    if mastery >= 0.85:
+    # Learner-facing graph/path state shares the 80% mastery threshold used by
+    # progress and the path UI. The stricter 85% threshold is reserved for
+    # internal prerequisite consolidation in LOOM.
+    if mastery >= 0.8:
         return "mastered"
     if mastery >= 0.6:
         return "reviewed"
@@ -300,6 +303,16 @@ async def build_knowledge_graph(
                 content_node_id = uuid.UUID(str(content_node_id))
             except (TypeError, ValueError):
                 content_node_id = None
+        # A concept may have no direct practice evidence yet while its linked
+        # textbook section has already been opened, reviewed or is actively
+        # being studied. Surface that authoritative chapter activity in the
+        # graph/path; otherwise a later chapter can never outrank the first
+        # untouched-looking concept. Direct concept mastery still wins.
+        content_progress = progress_by_content.get(content_node_id) if content_node_id else None
+        content_status, content_mastery = _status_from_learning_progress(content_progress)
+        if status != "mastered" and content_status != "not_started":
+            status = content_status
+            mastery = max(mastery, content_mastery)
         if content_node_id in curriculum_order_by_content:
             represented_content_ids.add(content_node_id)
             visual_id_by_content[content_node_id] = raw_id

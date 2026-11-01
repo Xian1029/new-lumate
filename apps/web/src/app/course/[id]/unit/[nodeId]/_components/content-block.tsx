@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import type { ContentNode, UploadedCourseFile } from "@/lib/api";
-import { getAiNoteForNode, listCourseFiles, type AiNoteForNode } from "@/lib/api";
+import { getAiNoteForNode, getContentTree, listCourseFiles, type AiNoteForNode } from "@/lib/api";
+import { findNodeById } from "@/lib/content-tree";
 import { API_BASE } from "@/lib/api/client";
 import { MarkdownRenderer } from "@/components/shared/markdown-renderer";
 import { useT } from "@/lib/i18n-context";
@@ -29,7 +30,7 @@ export function ContentBlock({ node, courseId }: { node: ContentNode; courseId: 
   const t = useT();
   const [aiNoteState, setAiNoteState] = useState<{ nodeId: string; note: AiNoteForNode | null } | null>(null);
   const sourceKey = `${courseId}:${node.file_id ?? ""}:${node.source_file ?? ""}`;
-  const [sourceState, setSourceState] = useState<{ key: string; url: string | null } | null>(null);
+  const [sourceState, setSourceState] = useState<{ key: string; url: string | null; jobId?: string; page?: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,12 +42,21 @@ export function ContentBlock({ node, courseId }: { node: ContentNode; courseId: 
 
   useEffect(() => {
     let cancelled = false;
-    listCourseFiles(courseId).then((files) => {
+    Promise.all([listCourseFiles(courseId), getContentTree(courseId)]).then(([files, currentTree]) => {
       const matched = findSourceFile(files, node);
+      // The unit route can stay mounted across a content-tree update. Read the
+      // current node once here so newly backfilled PDF page metadata is never
+      // lost behind an older Zustand snapshot.
+      const currentNode = findNodeById(currentTree, node.id) ?? node;
+      const page = currentNode.metadata?.source_pages?.[0];
       if (!cancelled) {
         setSourceState({
           key: sourceKey,
-          url: matched ? `${API_BASE}/content/files/${matched.job_id}` : null,
+          jobId: matched?.job_id,
+          page,
+          url: matched
+            ? `${API_BASE}/content/files/${matched.job_id}${page ? `#page=${page}` : ""}`
+            : null,
         });
       }
     }).catch(() => { if (!cancelled) setSourceState({ key: sourceKey, url: null }); });
@@ -68,9 +78,9 @@ export function ContentBlock({ node, courseId }: { node: ContentNode; courseId: 
         <h3 className={`font-bold text-foreground ${sizeClass}`}>{node.title}</h3>
         {sourceUrl ? (
           <a
-            href={sourceUrl}
-            target="_blank"
-            rel="noreferrer"
+            href={sourceState?.jobId && (sourceUrl.toLowerCase().includes(".pdf") || normalizedFileName(node.source_file).endsWith(".pdf"))
+              ? `/course/${courseId}/notes?reader=${encodeURIComponent(sourceState.jobId)}&page=${sourceState.page ?? 1}&node=${encodeURIComponent(node.id)}&from=unit`
+              : sourceUrl}
             className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs font-semibold text-emerald-800 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50"
           >
             <ExternalLink className="size-3.5" />

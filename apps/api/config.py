@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 7
+    admin_initial_password: str = ""
 
     # CORS
     # Local launcher may intentionally select another free frontend port.
@@ -245,6 +246,8 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "jwt_secret_key must be at least 32 characters when auth is enabled"
                 )
+            if self.deployment_mode == "multi_user" and not self.encryption_key:
+                raise ValueError("ENCRYPTION_KEY is required when DEPLOYMENT_MODE=multi_user")
         else:
             if self.deployment_mode != "single_user":
                 raise ValueError(

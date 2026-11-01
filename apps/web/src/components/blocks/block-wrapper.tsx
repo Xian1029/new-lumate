@@ -113,13 +113,6 @@ export function BlockWrapper({ block, courseId, aiActionsEnabled }: BlockWrapper
     return isBlockUnlocked(block.type, ctx);
   }, [block.type, courseId, courses.length, currentMode]);
 
-  const entry = BLOCK_REGISTRY[block.type];
-  if (!entry) return null;
-  const visual = BLOCK_VISUALS[block.type];
-  const BlockIcon = visual.Icon;
-  const isFocused = focusedBlockId === block.id;
-
-  const Component = entry.component;
   const isAgent = Boolean(block.agentMeta);
   const isInsight = block.type === "agent_insight";
   const needsApproval = isAgent && block.agentMeta?.needsApproval;
@@ -130,6 +123,12 @@ export function BlockWrapper({ block, courseId, aiActionsEnabled }: BlockWrapper
   useEffect(() => {
     if (invalidMasteryGate) dismissAgentBlock(block.id);
   }, [block.id, dismissAgentBlock, invalidMasteryGate]);
+  const entry = BLOCK_REGISTRY[block.type];
+  if (!entry) return null;
+  const visual = BLOCK_VISUALS[block.type];
+  const BlockIcon = visual.Icon;
+  const isFocused = focusedBlockId === block.id;
+  const Component = entry.component;
   // Old persisted insights sometimes contain placeholder concept names. Drop
   // them from the rendered workspace and remove the stale block from its layout.
   if (invalidMasteryGate) return null;

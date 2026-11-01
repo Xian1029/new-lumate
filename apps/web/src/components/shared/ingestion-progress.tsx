@@ -63,6 +63,15 @@ export function IngestionProgress({ courseId, onIngestionComplete }: IngestionPr
   const prevActiveCountRef = useRef(0);
   const [canvasAlertDismissed, setCanvasAlertDismissed] = useState(false);
   const [dismissedFailureIds, setDismissedFailureIds] = useState<Set<string>>(() => new Set());
+  const [dismissedPartialJobIds, setDismissedPartialJobIds] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      const saved = JSON.parse(localStorage.getItem(`lumate_dismissed_partial_ingestion_${courseId}`) || "[]");
+      return new Set(Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string") : []);
+    } catch {
+      return new Set();
+    }
+  });
   const [uploading, setUploading] = useState(false);
   const [replacementTarget, setReplacementTarget] = useState<IngestionJobSummary | null>(null);
   const retryInputRef = useRef<HTMLInputElement>(null);
@@ -82,7 +91,10 @@ export function IngestionProgress({ courseId, onIngestionComplete }: IngestionPr
   const otherFailedJobs = failedJobs.filter((j) => !isCanvasSessionError(j));
   // Completed but partially failed (some pages unreadable) — must warn, never show "解析完成"
   const partialJobs = visibleJobs.filter(
-    (j) => j.status === "completed" && j.page_stats && (j.page_stats.failed_pages?.length ?? 0) > 0,
+    (j) => j.status === "completed"
+      && j.page_stats
+      && (j.page_stats.failed_pages?.length ?? 0) > 0
+      && !dismissedPartialJobIds.has(j.id),
   );
 
   // Compute aggregate progress for active jobs
@@ -138,6 +150,18 @@ export function IngestionProgress({ courseId, onIngestionComplete }: IngestionPr
   const openReplacementUpload = (job?: IngestionJobSummary) => {
     setReplacementTarget(job ?? null);
     retryInputRef.current?.click();
+  };
+
+  const dismissPartialJob = (jobId: string) => {
+    setDismissedPartialJobIds((current) => {
+      const next = new Set(current).add(jobId);
+      try {
+        localStorage.setItem(`lumate_dismissed_partial_ingestion_${courseId}`, JSON.stringify([...next]));
+      } catch {
+        // Dismissing the visual notice should still work when browser storage is unavailable.
+      }
+      return next;
+    });
   };
 
   // Poll while there are active jobs
@@ -243,15 +267,26 @@ export function IngestionProgress({ courseId, onIngestionComplete }: IngestionPr
                     这些页面的内容暂时无法用于学习。
                   </p>
                 </div>
-                <button
-                  type="button"
-                  disabled={uploading}
-                  onClick={() => openReplacementUpload()}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
-                >
-                  <Upload className="size-3" />
-                  重新上传
-                </button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={uploading}
+                    onClick={() => openReplacementUpload(job)}
+                    className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                  >
+                    <Upload className="size-3" />
+                    重新上传
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => dismissPartialJob(job.id)}
+                    className="inline-flex size-7 items-center justify-center rounded-lg text-amber-700 transition-colors hover:bg-amber-100 hover:text-amber-950"
+                    aria-label={`关闭 ${job.filename} 的部分解析提示`}
+                    title="关闭提示"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
               </div>
             );
           })}

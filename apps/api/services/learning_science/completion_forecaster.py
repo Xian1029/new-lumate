@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 async def forecast_completion(
     db: AsyncSession,
     course_id: uuid.UUID,
+    user_id: uuid.UUID,
 ) -> dict:
     """Forecast course completion date based on learning velocity.
 
@@ -42,7 +43,7 @@ async def forecast_completion(
             "confidence": "high" | "medium" | "low",
         }
     """
-    velocity = await compute_velocity(db, course_id, window_days=14)
+    velocity = await compute_velocity(db, course_id, user_id, window_days=14)
     total = velocity["concepts_total"]
     mastered = velocity["concepts_mastered"]
     remaining = total - mastered
@@ -70,6 +71,7 @@ async def forecast_completion(
         .join(KnowledgeNode, ConceptMastery.knowledge_node_id == KnowledgeNode.id)
         .where(
             KnowledgeNode.course_id == str(course_id),
+            ConceptMastery.user_id == user_id,
             ConceptMastery.mastery_score < MASTERY_THRESHOLD,
         )
     )
