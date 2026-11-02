@@ -100,6 +100,19 @@ describe("content-tree helpers", () => {
     expect(isPracticeEligibleContentNode(preface)).toBe(false);
   });
 
+  it("keeps generic Word document sections available for learning", () => {
+    const genericSection: ContentNode = {
+      ...tree[0].children![0],
+      id: "word-section",
+      title: "调研目的",
+      content: "这是从无正式目录的 Word 正文生成的学习章节。",
+      content_category: "other",
+      source_file: "调研内容.docx",
+    };
+    expect(isLearnableContentNode(genericSection)).toBe(true);
+    expect(collectContentNodes([genericSection]).map((node) => node.id)).toEqual(["word-section"]);
+  });
+
   it("requires a specific leaf lesson for practice", () => {
     const sectionWithChildren: ContentNode = { ...tree[0], content: "Chapter overview" };
     expect(isPracticeEligibleContentNode(sectionWithChildren)).toBe(false);
