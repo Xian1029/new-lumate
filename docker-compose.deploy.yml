@@ -37,6 +37,7 @@ services:
       AUTH_ENABLED: ${AUTH_ENABLED:-false}
       DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-single_user}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
       CSRF_SECRET_KEY: ${CSRF_SECRET_KEY:?CSRF_SECRET_KEY must be set in deploy/.env.production}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in deploy/.env.production}
       CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set in deploy/.env.production}
