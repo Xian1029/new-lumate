@@ -40,9 +40,15 @@ def _status(row: PlatformAISettings, personal: UserAISettings | None = None) -> 
     key = row.get_key()
     response = {"platform_key_configured": bool(key), "platform_key_enabled": bool(row.platform_key_enabled),
                 "allow_personal_keys": bool(row.allow_personal_keys), "platform_key_masked": _mask(key)}
+    effective_key = key if row.platform_key_enabled and key else None
+    effective_source = "platform" if effective_key else None
     if personal is not None:
         pkey = personal.get_key()
         response.update({"personal_key_configured": bool(pkey), "personal_key_masked": _mask(pkey)})
+        if not effective_key and row.allow_personal_keys and pkey:
+            effective_key = pkey
+            effective_source = "personal"
+    response.update({"effective_key_available": bool(effective_key), "effective_key_source": effective_source})
     return response
 
 def _rate_limit(scope: str) -> None:
@@ -90,6 +96,17 @@ async def delete_personal_settings(user: User = Depends(get_current_user), db: A
 @router.post("/me/test")
 async def test_personal_key(body: KeyPayload, user: User = Depends(get_current_user)):
     return await _test_key(body.api_key.strip(), f"user:{user.id}")
+
+@router.post("/me/test-saved")
+async def test_saved_key(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    platform = await _platform(db)
+    personal = (await db.execute(select(UserAISettings).where(UserAISettings.user_id == user.id))).scalar_one_or_none()
+    key = platform.get_key() if platform.platform_key_enabled else None
+    if not key and platform.allow_personal_keys and personal:
+        key = personal.get_key()
+    if not key:
+        raise HTTPException(status_code=400, detail="当前账号没有可用的 AI Key")
+    return await _test_key(key, f"saved:{user.id}")
 
 @router.get("/platform")
 async def get_platform_settings(_: User = Depends(require_super_admin), db: AsyncSession = Depends(get_db)):
