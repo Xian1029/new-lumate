@@ -176,3 +176,23 @@ def test_number_line_interaction_answer_supports_common_prompt_wording():
     ))
     assert result.is_correct is True
     assert result.match_type == MatchType.STRUCTURED_EQUIVALENT
+
+
+def test_single_signed_weight_change_accepts_equivalent_explanation():
+    reference = "记作增长-0.5kg。"
+    answer = "-0.5kg\n增长值为负值是指减少值"
+    result = asyncio.run(grade_answer(
+        question_type="short_answer",
+        student_answer=answer,
+        expected_answer=reference,
+    ))
+    assert result.is_correct is True
+    assert result.match_type == MatchType.STRUCTURED_EQUIVALENT
+
+
+def test_single_signed_change_rejects_reversed_explanation():
+    assert grade_answer_deterministic(
+        question_type="short_answer",
+        student_answer="-0.5kg，负值表示体重增加",
+        expected_answer="记作增长-0.5kg。",
+    ) is False

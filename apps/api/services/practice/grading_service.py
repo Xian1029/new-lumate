@@ -746,7 +746,11 @@ def _measurement_limits_with_verdict_match(student: str, expected: str) -> bool 
 
 def _single_signed_context_quantity_match(student: str, expected: str) -> bool:
     """Accept a signed contextual result without requiring stem facts repeated."""
-    unit_pattern = "|".join(map(re.escape, ("km", "m", "cm", "mm", "千米", "米", "厘米", "毫米")))
+    units = (
+        "摄氏度", "千克", "公斤", "千米", "厘米", "毫米",
+        "kg", "km", "cm", "mm", "℃", "°c", "g", "m", "克", "米", "%", "％",
+    )
+    unit_pattern = "|".join(map(re.escape, units))
     pattern = re.compile(
         rf"([+\-]\s*(?:\d+(?:\.\d*)?|\.\d+))\s*({unit_pattern})(?![A-Za-z])",
         re.IGNORECASE,
@@ -757,15 +761,58 @@ def _single_signed_context_quantity_match(student: str, expected: str) -> bool:
         for raw_number, raw_unit in pattern.findall(normalize_answer(text)):
             unit = {
                 "千米": "km", "米": "m", "厘米": "cm", "毫米": "mm",
+                "千克": "kg", "公斤": "kg", "克": "g", "摄氏度": "℃", "°c": "℃", "％": "%",
             }.get(raw_unit.lower(), raw_unit.lower())
             result.add((float(raw_number.replace(" ", "")), unit))
+        return result
+
+    unsigned_pattern = re.compile(
+        rf"([+\-]?\s*(?:\d+(?:\.\d*)?|\.\d+))\s*({unit_pattern})(?![A-Za-z])",
+        re.IGNORECASE,
+    )
+
+    def magnitudes(text: str) -> set[tuple[float, str]]:
+        result: set[tuple[float, str]] = set()
+        for raw_number, raw_unit in unsigned_pattern.findall(normalize_answer(text)):
+            unit = {
+                "千米": "km", "米": "m", "厘米": "cm", "毫米": "mm",
+                "千克": "kg", "公斤": "kg", "克": "g", "摄氏度": "℃", "°c": "℃", "％": "%",
+            }.get(raw_unit.lower(), raw_unit.lower())
+            result.add((abs(float(raw_number.replace(" ", ""))), unit))
         return result
 
     student_values, expected_values = values(student), values(expected)
     if len(student_values) != 1 or not student_values.issubset(expected_values):
         return False
-    context_words = ("向左", "向右", "正方向", "负方向", "正数", "负数")
-    return any(word in student for word in context_words) and any(word in expected for word in context_words)
+    # This shortcut is only for a single independent requested quantity.  A
+    # multi-object answer may happen to contain one negative number while its
+    # other values or classification are wrong and must be checked in full.
+    student_magnitudes, expected_magnitudes = magnitudes(student), magnitudes(expected)
+    if len(student_magnitudes) != 1 or student_magnitudes != expected_magnitudes:
+        return False
+    context_words = (
+        "向左", "向右", "正方向", "负方向", "正数", "负数", "正值", "负值",
+        "增长", "增加", "减少", "上升", "下降", "变化量", "偏差",
+    )
+    if not any(word in student for word in context_words) or not any(word in expected for word in context_words):
+        return False
+
+    signed_number = next(iter(student_values))[0]
+    normalized_student = normalize_answer(student)
+    # A matching number must not mask an explicitly reversed interpretation.
+    # Naming the quantity itself (e.g. “增长值为负”) is not a conflict;
+    # only an explanatory relation after “表示/意味着/是指” is.
+    if signed_number < 0 and re.search(
+        r"(?:负(?:数|值)?).{0,10}(?:表示|意味着|是指).{0,8}(?:增加|增多|上升)",
+        normalized_student,
+    ):
+        return False
+    if signed_number > 0 and re.search(
+        r"(?:正(?:数|值)?).{0,10}(?:表示|意味着|是指).{0,8}(?:减少|变少|下降)",
+        normalized_student,
+    ):
+        return False
+    return True
 
 
 def _grade_objective(question_type: str, student: str, expected: str, options: Any) -> GradingResult:
