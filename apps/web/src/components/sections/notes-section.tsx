@@ -687,7 +687,7 @@ export function NotesSection({
 
           <div className="ml-auto flex items-center gap-2">
             {/* Node selector: prev / dropdown / next */}
-            {contentNodes.length > 1 && (
+            {contentNodes.length > 0 && (!selectedLearnableNode || contentNodes.length > 1) && (
               <>
                 <button
                   type="button"
