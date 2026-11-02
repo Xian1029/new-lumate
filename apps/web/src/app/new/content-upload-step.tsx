@@ -96,6 +96,14 @@ export function ContentUploadStep({
 
   const fallbackDestination = files[0]?.name.replace(/\.[^.]+$/, "").trim() || "综合学习资料";
   const destinationLabel = projectName.trim() || fallbackDestination;
+  const unresolvedFiles = uploadPlan?.unclassified.filter((file) => !fileAssignments[file.filename]) ?? [];
+  // A learner-entered name is an explicit request to keep the selected files
+  // in one new space.  Do not keep showing an automatic grouping warning in
+  // that case.  A single ambiguous file is also safely assigned to its own
+  // destination by the upload hook and needs no confirmation panel.
+  const shouldShowUploadPlan = !!uploadPlan && !projectName.trim() && (
+    uploadPlan.groups.length > 1 || unresolvedFiles.length > 0
+  );
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-7 p-4 animate-in fade-in duration-300 sm:p-8 lg:p-12">
@@ -153,7 +161,7 @@ export function ContentUploadStep({
       )}
 
       {/* Multi-subject split preview */}
-      {uploadPlan && (uploadPlan.groups.length > 1 || uploadPlan.unclassified.length > 0) && (
+      {uploadPlan && shouldShowUploadPlan && (
         <div className="flex flex-col gap-3 rounded-xl border border-brand/30 bg-brand-muted/20 p-4">
           <h3 className="text-sm font-semibold text-foreground">{uploadPlan.groups.length > 0 ? `根据文件名识别到 ${uploadPlan.groups.length} 个学科分组` : "资料类型与学科归属待确认"}</h3>
           <div className="flex flex-wrap gap-2"><button type="button" onClick={onCombineAll} className="rounded-md border border-brand/40 bg-background px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand-muted">全部放入新建空间「{destinationLabel}」</button><button type="button" onClick={onResetGrouping} className="rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted">恢复自动分组</button></div>
