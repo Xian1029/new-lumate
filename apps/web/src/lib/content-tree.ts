@@ -1,6 +1,10 @@
 import type { ContentNode } from "@/lib/api";
 
-const NON_LEARNING_CATEGORIES = new Set(["reference", "syllabus", "assignment", "exam_schedule", "other"]);
+// `other` means that automatic classification could not name a K-12 material
+// type; it does not mean the extracted document is non-learnable. Generic
+// Word reports and user-authored documents still produce grounded sections
+// and must remain selectable throughout notes, practice and progress views.
+const NON_LEARNING_CATEGORIES = new Set(["reference", "syllabus", "assignment", "exam_schedule"]);
 // Imported textbooks often contain a real-looking text node for the cover,
 // foreword or table of contents.  It is source material, not a lesson: it
 // must never unlock practice, alter progress, or become a recommendation.
