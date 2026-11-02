@@ -302,8 +302,9 @@ async def get_due_flashcards(
 ):
     """Get flashcards due for review today across all saved batches for a course.
 
-    Scans all active flashcard batches and returns cards whose FSRS `due` date
-    is at or before the current time, plus any new cards (no FSRS data yet).
+    Scans active batches and returns only cards previously reviewed by this
+    learner whose next FSRS date is due. New cards belong to initial learning,
+    not to the "today review" reminder.
     """
     from models.generated_asset import GeneratedAsset
 
@@ -326,7 +327,12 @@ async def get_due_flashcards(
         cards = (batch.content or {}).get("cards", [])
         for card_index, card in enumerate(cards):
             from services.spaced_repetition.flashcards import is_flashcard_due
-            if is_flashcard_due(card, now):
+            fsrs = card.get("fsrs") or {}
+            try:
+                has_review_history = int(fsrs.get("reps") or 0) > 0 or bool(fsrs.get("last_review"))
+            except (TypeError, ValueError):
+                has_review_history = bool(fsrs.get("last_review"))
+            if has_review_history and is_flashcard_due(card, now):
                 due_cards.append({**card, "batch_id": str(batch.batch_id), "card_index": card_index})
 
     # Adjust card order based on cognitive load (easier cards first when loaded)

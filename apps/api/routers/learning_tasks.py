@@ -9,9 +9,10 @@ from database import get_db
 from libs.exceptions import ConflictError, NotFoundError
 from models.learning_plan import LearningPlan
 from models.learning_task import LearningTask
+from models.content import CourseContentTree
 from models.user import User
 from routers.learning_plans import _task_response
-from schemas.learning_plan import LearningTaskResponse, PostponeLearningTaskRequest
+from schemas.learning_plan import LearningTaskResponse, PostponeLearningTaskRequest, StartLearningPlanResponse
 from services.auth.dependency import get_current_user
 from services.learning_plans import LearningTaskService, LearningTaskTransitionError
 
@@ -36,6 +37,32 @@ async def _task_action(task_id: uuid.UUID, user: User, db: AsyncSession, action:
 
 @router.post("/{task_id}/start", response_model=LearningTaskResponse)
 async def start_task(task_id: uuid.UUID, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)): return await _task_action(task_id, user, db, "start_task")
+
+
+@router.post("/{task_id}/launch", response_model=StartLearningPlanResponse)
+async def launch_task(task_id: uuid.UUID, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Start the task the learner clicked and return its exact workspace link."""
+    task = await _owned_task(db, task_id, user.id)
+    try:
+        await LearningTaskService.start_task(db, task)
+    except LearningTaskTransitionError as exc:
+        raise ConflictError(str(exc)) from exc
+    plan = await db.get(LearningPlan, task.plan_id)
+    node_exists = bool(task.content_node_id and (await db.execute(
+        select(CourseContentTree.id).where(
+            CourseContentTree.id == task.content_node_id,
+            CourseContentTree.course_id == task.course_id,
+        )
+    )).scalar_one_or_none())
+    from routers.learning_plans import _plan_response
+    from services.learning_plans.action_links import build_action_href, module_for_task_type
+    href = build_action_href(task_type=task.task_type, course_id=task.course_id,
+                             content_node_id=task.content_node_id, node_exists=node_exists,
+                             guided_session=True)
+    await db.commit(); await db.refresh(task); await db.refresh(plan)
+    return StartLearningPlanResponse(plan=_plan_response(plan), task=_task_response(task), href=href,
+                                     target_module=module_for_task_type(task.task_type),
+                                     relocated=bool(task.content_node_id and not node_exists))
 @router.post("/{task_id}/complete", response_model=LearningTaskResponse)
 async def complete_task(task_id: uuid.UUID, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)): return await _task_action(task_id, user, db, "complete_task")
 @router.post("/{task_id}/postpone", response_model=LearningTaskResponse)

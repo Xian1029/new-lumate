@@ -8,7 +8,7 @@
 
 export type { JsonObject, NullableDateTime } from "./client";
 
-export { listLearningPlans, createLearningPlan, getLearningPlan, deleteLearningPlan, listLearningPlanTasks, createLearningTask, updateLearningPlan, planAction, startLearningPlan, regenerateLearningPlan, getLearningPlanDashboard, getLearningHomeOverview, getCourseLearningPlanDashboard, taskAction, postponeLearningTask, planStatusLabel, taskStatusLabel, taskTypeLabel } from "./learning-plans";
+export { listLearningPlans, createLearningPlan, getLearningPlan, deleteLearningPlan, listLearningPlanTasks, createLearningTask, updateLearningPlan, planAction, startLearningPlan, startLearningTask, regenerateLearningPlan, getLearningPlanDashboard, getLearningHomeOverview, getCourseLearningPlanDashboard, taskAction, postponeLearningTask, planStatusLabel, taskStatusLabel, taskTypeLabel, getPlanOverdueDays } from "./learning-plans";
 export type { LearningPlan, LearningTask, StartLearningPlanResult, HomeLearningTask, LearningPlanSummary, LearningPlanDashboard, LearningHomeOverview, HomeCalendarItem, HomeLearningAction, HomeLearningSpace, HomeProcessingUpload, HomeReviewItem, WorkspaceLearningProgress, LearningPlanStatus, LearningTaskStatus, LearningTaskType } from "./learning-plans";
 
 export {

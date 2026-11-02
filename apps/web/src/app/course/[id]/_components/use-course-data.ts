@@ -49,7 +49,9 @@ export function useCourseData(courseId: string) {
     recordSessionVisit();
   }, [courseId]);
 
-  const course = activeCourse ?? courses.find((item) => item.id === courseId) ?? null;
+  const course = activeCourse?.id === courseId
+    ? activeCourse
+    : courses.find((item) => item.id === courseId) ?? null;
   const aiActionsEnabled =
     health?.llm_status !== "mock_fallback" &&
     health?.llm_status !== "configuration_required";

@@ -43,6 +43,16 @@ def _task_response(task: LearningTask) -> LearningTaskResponse:
     return LearningTaskResponse(**payload)
 
 
+def _plan_overdue_days(plan: LearningPlan) -> int:
+    if not plan.target_date or plan.status not in {
+        LearningPlanStatus.ACTIVE.value,
+        LearningPlanStatus.PAUSED.value,
+        LearningPlanStatus.PENDING_APPROVAL.value,
+    }:
+        return 0
+    return max(0, (date.today() - plan.target_date).days)
+
+
 async def _owned_plan(db: AsyncSession, plan_id: uuid.UUID, user_id: uuid.UUID) -> LearningPlan:
     plan = (await db.execute(select(LearningPlan).where(LearningPlan.id == plan_id, LearningPlan.user_id == user_id))).scalar_one_or_none()
     if not plan:
@@ -128,9 +138,16 @@ async def update_learning_plan(plan_id: uuid.UUID, body: UpdateLearningPlanReque
 
 @router.get("/{plan_id}/tasks", response_model=list[LearningTaskResponse])
 async def list_learning_plan_tasks(plan_id: uuid.UUID, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    await _owned_plan(db, plan_id, user.id)
+    plan = await _owned_plan(db, plan_id, user.id)
     tasks = (await db.execute(select(LearningTask).where(LearningTask.plan_id == plan_id).order_by(LearningTask.sequence))).scalars().all()
-    return [_task_response(task) for task in tasks]
+    overdue_days = _plan_overdue_days(plan)
+    responses: list[LearningTaskResponse] = []
+    for task in tasks:
+        response = _task_response(task)
+        if overdue_days:
+            response.metadata_json = {**(response.metadata_json or {}), "plan_overdue_days": overdue_days}
+        responses.append(response)
+    return responses
 
 
 @router.post("/{plan_id}/start", response_model=StartLearningPlanResponse)

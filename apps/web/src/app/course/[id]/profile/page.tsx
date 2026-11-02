@@ -39,7 +39,7 @@ export default function ProfilePage() {
       .catch((e) => console.error("[Profile] health check failed:", e));
   }, []);
 
-  const course = activeCourse ?? courses.find((c) => c.id === courseId) ?? null;
+  const course = activeCourse?.id === courseId ? activeCourse : courses.find((c) => c.id === courseId) ?? null;
   const aiActionsEnabled =
     health?.llm_status !== "mock_fallback" &&
     health?.llm_status !== "configuration_required";

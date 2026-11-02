@@ -5,7 +5,7 @@ export type LearningTaskStatus = "PENDING" | "READY" | "IN_PROGRESS" | "COMPLETE
 export type LearningTaskType = "LEARN" | "PRACTICE" | "FLASHCARD" | "REVIEW" | "REFLECTION" | "ASSESSMENT" | "NOTE";
 
 export interface LearningPlan { id: string; course_id: string; goal_id: string | null; title: string; description: string | null; source: string; status: LearningPlanStatus; version: number; start_date: string | null; target_date: string | null; available_minutes_per_day: number | null; study_days_of_week: number[] | null; total_estimated_minutes: number | null; supersedes_plan_id?: string | null; approved_at: string | null; activated_at: string | null; completed_at: string | null; cancelled_at: string | null; created_at: string | null; }
-export interface LearningTask { id: string; plan_id: string; course_id: string; content_node_id: string | null; knowledge_point_id: string | null; task_type: LearningTaskType; title: string; instruction: string | null; action_href: string | null; scheduled_for: string | null; estimated_minutes: number | null; sequence: number; required: boolean; status: LearningTaskStatus; completed_at: string | null; postponed_to: string | null; planning_reason: string | null; }
+export interface LearningTask { id: string; plan_id: string; course_id: string; content_node_id: string | null; knowledge_point_id: string | null; task_type: LearningTaskType; title: string; instruction: string | null; action_href: string | null; scheduled_for: string | null; estimated_minutes: number | null; sequence: number; required: boolean; status: LearningTaskStatus; completed_at: string | null; postponed_to: string | null; planning_reason: string | null; metadata_json?: Record<string, unknown> | null; }
 export interface StartLearningPlanResult { plan: LearningPlan; task: LearningTask; href: string; target_module: string; relocated: boolean; }
 export interface HomeLearningTask extends LearningTask { href: string; course_name?: string; plan_title?: string; }
 export interface LearningPlanSummary { plan: LearningPlan; task_count: number; completed_task_count: number; remaining_minutes: number; }
@@ -46,6 +46,7 @@ export const updateLearningTask = (planId: string, taskId: string, body: Partial
 export const updateLearningPlan = (planId: string, body: Partial<Pick<LearningPlan, "title" | "description" | "target_date" | "available_minutes_per_day" | "study_days_of_week">> & { expected_version?: number }) => request<LearningPlan>(`/learning-plans/${planId}`, { method: "PATCH", body: JSON.stringify(body) });
 export const planAction = (planId: string, action: "submit" | "approve" | "request-changes" | "cancel" | "pause" | "resume" | "complete", reason?: string, expectedVersion?: number) => request<LearningPlan>(`/learning-plans/${planId}/${action}`, { method: "POST", body: JSON.stringify({ reason, expected_version: expectedVersion }) });
 export const startLearningPlan = (planId: string) => request<StartLearningPlanResult>(`/learning-plans/${planId}/start`, { method: "POST" });
+export const startLearningTask = (taskId: string) => request<StartLearningPlanResult>(`/learning-tasks/${taskId}/launch`, { method: "POST" });
 export const regenerateLearningPlan = (planId: string) => request<LearningTask[]>(`/learning-plans/${planId}/regenerate`, { method: "POST" });
 export const getLearningPlanDashboard = () => request<LearningPlanDashboard>("/learning-plan-dashboard/");
 /** One server-owned view model for the personal learning homepage. */
@@ -57,3 +58,11 @@ export const postponeLearningTask = (taskId: string, postponedTo: string) => req
 export const planStatusLabel: Record<LearningPlanStatus, string> = { DRAFT: "草稿", PENDING_APPROVAL: "待确认", CHANGES_REQUESTED: "待调整", ACTIVE: "进行中", PAUSED: "已暂停", COMPLETED: "已完成", CANCELLED: "已取消" };
 export const taskStatusLabel: Record<LearningTaskStatus, string> = { PENDING: "待开始", READY: "可以开始", IN_PROGRESS: "进行中", COMPLETED: "已完成", POSTPONED: "已延后", MISSED: "待重新安排", SKIPPED: "已跳过" };
 export const taskTypeLabel: Record<LearningTaskType, string> = { LEARN: "学习", PRACTICE: "练习", FLASHCARD: "复习卡片", REVIEW: "复习", REFLECTION: "总结", ASSESSMENT: "检测", NOTE: "整理笔记" };
+
+export function getPlanOverdueDays(plan: Pick<LearningPlan, "target_date" | "status">, now = new Date()): number {
+  if (!plan.target_date || !["ACTIVE", "PAUSED", "PENDING_APPROVAL"].includes(plan.status)) return 0;
+  const [year, month, day] = plan.target_date.split("-").map(Number);
+  const target = new Date(year, month - 1, day);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.max(0, Math.floor((today.getTime() - target.getTime()) / 86_400_000));
+}

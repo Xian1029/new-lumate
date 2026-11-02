@@ -52,7 +52,7 @@ export default function PlanPage() {
   }, []);
 
 
-  const course = activeCourse ?? courses.find((c) => c.id === courseId) ?? null;
+  const course = activeCourse?.id === courseId ? activeCourse : courses.find((c) => c.id === courseId) ?? null;
   const resolvedMode = useMemo(() => {
     const metadata = (course?.metadata as Record<string, unknown> | undefined) ?? {};
     const layout = metadata.spaceLayout;

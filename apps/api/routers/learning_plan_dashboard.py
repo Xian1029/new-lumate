@@ -429,7 +429,10 @@ async def learning_home_overview(user: User = Depends(get_current_user), db: Asy
     today_tasks = [
         task for task in active_tasks
         if task.status == LearningTaskStatus.IN_PROGRESS.value
-        or (_effective_task_date(task) is not None and _effective_task_date(task) <= today)
+        # An active-plan task without an explicit schedule is actionable now,
+        # rather than disappearing from today's count until it is clicked.
+        or _effective_task_date(task) is None
+        or _effective_task_date(task) <= today
     ]
     # The home reminder is deliberately derived from the same LearningTask
     # rows as "today".  It is not a second calendar/recommendation system.
