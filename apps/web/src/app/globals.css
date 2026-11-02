@@ -379,10 +379,16 @@
 }
 
 /* ── WCAG 2.1 AA: Visible focus indicators for keyboard navigation ── */
-*:focus-visible {
+:where(*:focus-visible) {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* Composite inputs draw their focus state on the outer shell. */
+[data-focus-shell] > input:focus-visible {
+  outline: none;
+  outline-offset: 0;
 }
 
 /* Reduce motion for users who prefer it */
