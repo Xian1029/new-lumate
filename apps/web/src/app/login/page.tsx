@@ -86,14 +86,14 @@ export default function LoginPage() {
                 <span className="text-sm font-medium text-[#34443d]">用户名</span>
                 <div className="flex h-13 items-center rounded-xl border border-[#deddd7] bg-[#fbfaf7] px-4 transition focus-within:border-[#789081] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#789081]/10">
                   <UserRound className="mr-3 h-4.5 w-4.5 shrink-0 text-[#8d9993]" />
-                  <input required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="请输入用户名" className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none focus-visible:outline-none placeholder:text-[#a8aaa7]" />
+                  <input required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="请输入用户名" style={{ outline: "none" }} className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent text-sm shadow-none !outline-none focus-visible:!outline-none placeholder:text-[#a8aaa7]" />
                 </div>
               </label>
               <label className="block space-y-2">
                 <span className="text-sm font-medium text-[#34443d]">密码</span>
                 <div className="flex h-13 items-center rounded-xl border border-[#deddd7] bg-[#fbfaf7] px-4 transition focus-within:border-[#789081] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#789081]/10">
                   <LockKeyhole className="mr-3 h-4.5 w-4.5 shrink-0 text-[#8d9993]" />
-                  <input required autoComplete="current-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none focus-visible:outline-none placeholder:text-[#a8aaa7]" />
+                  <input required autoComplete="current-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" style={{ outline: "none" }} className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent text-sm shadow-none !outline-none focus-visible:!outline-none placeholder:text-[#a8aaa7]" />
                   <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "隐藏密码" : "显示密码"} className="rounded-lg p-1.5 text-[#8d9993] transition hover:bg-[#eef1ed] hover:text-[#53695e]">
                     {showPassword ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
                   </button>
