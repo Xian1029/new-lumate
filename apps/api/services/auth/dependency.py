@@ -42,17 +42,21 @@ async def _execute_user_query(db: AsyncSession, query):
 async def _bind_user_ai_credential(db: AsyncSession, user: User, request: Request | None) -> None:
     """Resolve platform-first, personal-second AI credentials for this request."""
     from models.ai_settings import PlatformAISettings, UserAISettings
-    from services.llm.router import set_request_deepseek_key
+    from services.llm.router import set_request_ai_credential
 
     platform = (await db.execute(
         select(PlatformAISettings).where(PlatformAISettings.id == 1)
     )).scalar_one_or_none()
     effective_key = None
+    effective_provider = "deepseek"
+    effective_model = None
     source = None
     if platform and platform.platform_key_enabled:
         effective_key = platform.get_key()
         if effective_key:
             source = "platform"
+            effective_provider = platform.provider or "deepseek"
+            effective_model = platform.model
     if not effective_key and (platform is None or platform.allow_personal_keys):
         personal = (await db.execute(
             select(UserAISettings).where(UserAISettings.user_id == user.id)
@@ -61,7 +65,9 @@ async def _bind_user_ai_credential(db: AsyncSession, user: User, request: Reques
             effective_key = personal.get_key()
             if effective_key:
                 source = "personal"
-    set_request_deepseek_key(effective_key)
+                effective_provider = personal.provider or "deepseek"
+                effective_model = personal.model
+    set_request_ai_credential(effective_provider, effective_key, effective_model)
     if request is not None:
         request.state.ai_key_source = source
 

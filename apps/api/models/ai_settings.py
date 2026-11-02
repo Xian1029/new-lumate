@@ -17,6 +17,8 @@ class PlatformAISettings(Base):
     __tablename__ = "platform_ai_settings"
     id: Mapped[int] = mapped_column(primary_key=True, default=1)
     encrypted_deepseek_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="deepseek")
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     platform_key_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     allow_personal_keys: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(CompatUUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -35,6 +37,8 @@ class UserAISettings(Base):
     __tablename__ = "user_ai_settings"
     user_id: Mapped[uuid.UUID] = mapped_column(CompatUUID, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     encrypted_deepseek_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="deepseek")
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     def set_key(self, value: str | None) -> None:

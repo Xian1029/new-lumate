@@ -45,18 +45,32 @@ logger = logging.getLogger(__name__)
 _request_llm_client: ContextVar[LLMClient | None] = ContextVar("request_llm_client", default=None)
 
 
-def set_request_deepseek_key(api_key: str | None) -> None:
-    """Bind the effective DeepSeek credential to the current request context."""
+_ACCOUNT_PROVIDER_DEFAULTS = {
+    "deepseek": ("deepseek-chat", "https://api.deepseek.com/v1"),
+    "openai": ("gpt-4o-mini", None),
+    "openrouter": ("openai/gpt-4o-mini", "https://openrouter.ai/api/v1"),
+    "gemini": ("gemini-2.0-flash", "https://generativelanguage.googleapis.com/v1beta/openai/"),
+    "groq": ("llama-3.3-70b-versatile", "https://api.groq.com/openai/v1"),
+}
+
+
+def set_request_ai_credential(provider: str | None, api_key: str | None, model: str | None = None) -> None:
+    """Bind one encrypted account credential to the current request context."""
     client = None
     if api_key:
-        client = OpenAIClient(
-            api_key,
-            "deepseek-chat",
-            base_url="https://api.deepseek.com/v1",
-            name="deepseek-user",
-            trust_env=settings.llm_trust_env,
-        )
+        selected = (provider or "deepseek").lower()
+        if selected == "anthropic":
+            client = AnthropicClient(api_key, model or "claude-3-5-haiku-latest")
+        elif selected in _ACCOUNT_PROVIDER_DEFAULTS:
+            default_model, base_url = _ACCOUNT_PROVIDER_DEFAULTS[selected]
+            client = OpenAIClient(api_key, model or default_model, base_url=base_url,
+                                  name=f"{selected}-user", trust_env=settings.llm_trust_env)
     _request_llm_client.set(client)
+
+
+def set_request_deepseek_key(api_key: str | None) -> None:
+    """Backward-compatible helper for existing callers."""
+    set_request_ai_credential("deepseek", api_key)
 
 
 def get_request_llm_client() -> LLMClient | None:

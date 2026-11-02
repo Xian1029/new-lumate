@@ -118,6 +118,14 @@ _LOCAL_ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
     "study_sessions": {
         "target_module": "VARCHAR(30)",
     },
+    "platform_ai_settings": {
+        "provider": "VARCHAR(32) NOT NULL DEFAULT 'deepseek'",
+        "model": "VARCHAR(128)",
+    },
+    "user_ai_settings": {
+        "provider": "VARCHAR(32) NOT NULL DEFAULT 'deepseek'",
+        "model": "VARCHAR(128)",
+    },
 }
 
 
@@ -483,8 +491,12 @@ def _start_health_monitor() -> None:
 
 
 def _should_run_health_monitor() -> bool:
-    """Disable health monitor in pytest to avoid cross-loop teardown races."""
-    return not os.environ.get("PYTEST_CURRENT_TEST")
+    """Run the legacy global monitor only for single-user deployments.
+
+    Multi-user credentials are encrypted database records selected per request;
+    probing process environment keys there produces misleading account status.
+    """
+    return settings.deployment_mode == "single_user" and not os.environ.get("PYTEST_CURRENT_TEST")
 
 
 async def _stop_health_monitor() -> None:
@@ -529,7 +541,9 @@ async def run_startup_hooks() -> None:
     await _cleanup_stale_provisional_workspaces()
     await _backfill_question_catalog()
     await _maybe_seed_system_data()
-    if _should_run_health_monitor():
+    # Account-scoped cloud credentials are resolved per request in multi-user
+    # mode. Local desktop runtimes must not be probed or advertised there.
+    if _should_run_health_monitor() and settings.deployment_mode == "single_user":
         await _detect_local_llm()
     _maybe_start_scheduler()
     _maybe_start_activity_engine()
