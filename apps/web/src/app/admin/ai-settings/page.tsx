@@ -2,14 +2,35 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 type Settings = { platform_key_configured: boolean; platform_key_enabled: boolean; allow_personal_keys: boolean; platform_key_masked?: string };
-type Account = { id: string; username: string; name: string; is_active: boolean };
-export default function AdminSettings() {
+export default function AISettings() {
   const router = useRouter();
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [key, setKey] = useState(""); const [username, setUsername] = useState(""); const [name, setName] = useState(""); const [password, setPassword] = useState(""); const [message, setMessage] = useState("");
-  async function refresh() { const a = await fetch("/api/ai-settings/platform"); const b = await fetch("/api/auth/admin/users"); if (!a.ok || !b.ok) { router.replace("/"); return; } setSettings(await a.json()); setAccounts(await b.json()); }
+  const [key, setKey] = useState("");
+  const [message, setMessage] = useState("");
+  async function refresh() {
+    const response = await fetch("/api/ai-settings/platform", { credentials: "include" });
+    if (!response.ok) { router.replace("/"); return; }
+    setSettings(await response.json());
+  }
   useEffect(() => { void refresh(); }, []);
-  async function update(path: string, method: string, body?: object) { const r = await fetch(path, { method, credentials: "include", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined }); if (!r.ok) { const e = await r.json().catch(() => null); setMessage(e?.detail || "操作失败"); return; } setMessage("已保存"); await refresh(); }
-  return <main className="mx-auto max-w-2xl space-y-6 p-6"><button onClick={() => router.push("/")} className="text-sm text-brand">← 返回首页</button><h1 className="text-2xl font-bold">管理员设置</h1><section className="space-y-4 rounded-2xl border bg-card p-5"><h2 className="font-semibold">AI 服务策略</h2><p className="text-sm text-muted-foreground">平台 Key 优先；停用平台 Key 后，允许用户配置个人 Key。</p><input type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} placeholder={settings?.platform_key_masked || "DeepSeek API Key"} className="w-full rounded-lg border p-3"/><label className="flex gap-2"><input type="checkbox" checked={!!settings?.platform_key_enabled} onChange={e => setSettings(s => s && { ...s, platform_key_enabled: e.target.checked })}/>启用平台 Key</label><label className="flex gap-2"><input type="checkbox" checked={!!settings?.allow_personal_keys} onChange={e => setSettings(s => s && { ...s, allow_personal_keys: e.target.checked })}/>允许个人 Key</label><button onClick={() => void update("/api/ai-settings/platform", "PUT", { api_key: key || undefined, enabled: settings?.platform_key_enabled, allow_personal_keys: settings?.allow_personal_keys }).then(() => setKey(""))} className="rounded-lg bg-brand px-4 py-2 text-brand-foreground">保存设置</button>{settings?.platform_key_configured && <button onClick={() => void update("/api/ai-settings/platform", "DELETE")} className="ml-3 text-sm text-destructive">删除平台 Key</button>}</section><section className="space-y-4 rounded-2xl border bg-card p-5"><h2 className="font-semibold">普通账号管理</h2><div className="grid gap-2 sm:grid-cols-3"><input placeholder="用户名" value={username} onChange={e => setUsername(e.target.value)} className="rounded-lg border p-2"/><input placeholder="昵称" value={name} onChange={e => setName(e.target.value)} className="rounded-lg border p-2"/><input type="password" placeholder="初始密码（至少 8 位）" value={password} onChange={e => setPassword(e.target.value)} className="rounded-lg border p-2"/></div><button disabled={username.length < 3 || password.length < 8} onClick={() => void update("/api/auth/admin/users", "POST", { username, name, password }).then(() => { setUsername(""); setName(""); setPassword(""); })} className="rounded-lg bg-brand px-4 py-2 text-brand-foreground disabled:opacity-50">创建普通账号</button><div className="divide-y">{accounts.map(u => <div key={u.id} className="flex items-center gap-3 py-3 text-sm"><span className="flex-1">{u.name} · {u.username}（{u.is_active ? "正常" : "已停用"}）</span><button className="text-brand" onClick={() => void update(`/api/auth/admin/users/${u.id}`, "PATCH", { is_active: !u.is_active })}>{u.is_active ? "停用" : "恢复"}</button><button className="text-destructive" onClick={() => { if (confirm(`永久删除账号 ${u.username}？此操作不可撤销。已有学习数据的账号只允许停用。`)) void update(`/api/auth/admin/users/${u.id}`, "DELETE"); }}>永久删除</button></div>)}</div></section>{message && <p role="status" className="text-sm">{message}</p>}</main>;
+  async function update(method: "PUT" | "DELETE") {
+    const response = await fetch("/api/ai-settings/platform", {
+      method, credentials: "include", headers: { "Content-Type": "application/json" },
+      body: method === "PUT" ? JSON.stringify({ api_key: key || undefined, enabled: settings?.platform_key_enabled, allow_personal_keys: settings?.allow_personal_keys }) : undefined,
+    });
+    if (!response.ok) { setMessage("保存失败，请重试"); return; }
+    setKey(""); setMessage("已保存"); await refresh();
+  }
+  return <main className="mx-auto max-w-xl space-y-5 p-6">
+    <button onClick={() => router.push("/")} className="text-sm text-brand">← 返回首页</button>
+    <h1 className="text-2xl font-bold">平台 AI 设置</h1>
+    <p className="text-sm text-muted-foreground">平台 Key 优先；停用平台 Key 后可允许用户配置个人 Key。完整密钥不会在此显示。</p>
+    <div className="space-y-4 rounded-2xl border bg-card p-5">
+      <input type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} placeholder={settings?.platform_key_masked || "DeepSeek API Key"} className="w-full rounded-lg border p-3" />
+      <label className="flex gap-2"><input type="checkbox" checked={!!settings?.platform_key_enabled} onChange={e => setSettings(s => s && { ...s, platform_key_enabled: e.target.checked })} />启用平台 Key</label>
+      <label className="flex gap-2"><input type="checkbox" checked={!!settings?.allow_personal_keys} onChange={e => setSettings(s => s && { ...s, allow_personal_keys: e.target.checked })} />允许个人 Key</label>
+      <button onClick={() => void update("PUT")} className="rounded-lg bg-brand px-4 py-2 text-brand-foreground">保存设置</button>
+      {settings?.platform_key_configured && <button onClick={() => void update("DELETE")} className="ml-3 text-sm text-destructive">删除平台 Key</button>}
+    </div>{message && <p role="status" className="text-sm">{message}</p>}
+  </main>;
 }
