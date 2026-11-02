@@ -446,24 +446,32 @@ async def learning_home_overview(user: User = Depends(get_current_user), db: Asy
     existing_nodes = await _existing_node_ids(db, active_tasks)
     course_names = {course.id: course.name for course in courses}
     plan_titles = {plan.id: plan.title for plan in plans}
-    calendar_items = [
-        {
+    calendar_items = []
+    for task in active_tasks:
+        # An active task without a manually assigned day is actionable today.
+        # Excluding it from the calendar made a task disappear immediately
+        # after the learner clicked “start”.
+        effective_date = _effective_task_date(task) or today
+        overdue_days = max(0, (today - effective_date).days)
+        calendar_items.append({
             "id": f"task:{task.id}", "plan_id": str(task.plan_id),
             "course_id": str(task.course_id), "course_name": course_names.get(task.course_id, "学习空间"),
             "plan_title": plan_titles.get(task.plan_id, "学习计划"),
             "title": task.title, "date": effective_date.isoformat(),
             "item_type": "TASK", "status": task.status,
             "estimated_minutes": task.estimated_minutes, "href": _task_href(task, existing_nodes),
-        }
-        for task in active_tasks
-        if (effective_date := _effective_task_date(task)) is not None
-    ]
+            "is_overdue": overdue_days > 0, "overdue_days": overdue_days,
+            "is_unscheduled": _effective_task_date(task) is None,
+        })
     calendar_items.extend({
         "id": f"plan:{plan.id}", "plan_id": str(plan.id),
         "course_id": str(plan.course_id), "course_name": course_names.get(plan.course_id, "学习空间"),
         "title": plan.title, "date": plan.target_date.isoformat(),
         "item_type": "PLAN_TARGET", "status": plan.status,
         "estimated_minutes": plan.total_estimated_minutes, "href": f"/learning-plans/{plan.id}",
+        "is_overdue": plan.target_date < today,
+        "overdue_days": max(0, (today - plan.target_date).days),
+        "is_unscheduled": False,
     } for plan in plans if plan.target_date is not None and plan.status in {"ACTIVE", "PAUSED"})
     calendar_items.sort(key=lambda item: (item["date"], item["item_type"], item["title"]))
 
@@ -827,6 +835,13 @@ async def course_learning_plan_dashboard(course_id: uuid.UUID, user: User = Depe
     pending = next((plan for plan in plans if plan.status == LearningPlanStatus.PENDING_APPROVAL.value), None)
     active = next((plan for plan in plans if plan.status in {LearningPlanStatus.ACTIVE.value, LearningPlanStatus.PAUSED.value}), None)
     tasks = await _tasks_for_active_plans(db, user.id, course_id)
+    plan_tasks = []
+    if active is not None:
+        plan_tasks = list((await db.execute(
+            select(LearningTask)
+            .where(LearningTask.plan_id == active.id, LearningTask.course_id == course_id)
+            .order_by(LearningTask.sequence)
+        )).scalars().all())
     nodes = list((await db.execute(select(CourseContentTree).where(
         CourseContentTree.course_id == course_id,
     ))).scalars().all())
@@ -844,6 +859,7 @@ async def course_learning_plan_dashboard(course_id: uuid.UUID, user: User = Depe
         "active_plan": await _plan_summary(db, active) if active else None,
         "current_task": _task_response(tasks[0]) if tasks else None,
         "today_tasks": [_task_response(task) for task in tasks],
+        "plan_tasks": [_task_response(task) for task in plan_tasks],
         # Same view used by the home learning-space card. The graph consumes
         # this endpoint, so both screens share one progress contract.
         "workspace_progress": course_progress_view(snapshot),

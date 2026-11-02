@@ -10,7 +10,7 @@ Covers:
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
@@ -233,3 +233,36 @@ async def test_in_progress_task_cta_stays_continue(session):
     assert action["action_text"] == "继续学习"
     assert action["href"] == f"/course/{course.id}?node={node.id}&module=PRACTICE"
     assert action["target_module"] == "PRACTICE"
+
+
+@pytest.mark.asyncio
+async def test_unscheduled_active_task_appears_on_today_calendar(session):
+    db, user, course, node = session
+    plan = await LearningPlanService.create_draft(db, user_id=user.id, course_id=course.id, title="无排期计划")
+    task = await LearningTaskService.create_task(
+        db, plan_id=plan.id, course_id=course.id, content_node_id=node.id,
+        task_type="LEARN", title="已开启的第二个任务", scheduled_for=None, sequence=1,
+    )
+    await LearningPlanService.submit_for_approval(db, plan, user.id)
+    await LearningPlanService.approve(db, plan, user.id)
+    await LearningTaskService.start_task(db, task)
+    await db.commit()
+
+    overview = await learning_home_overview(user=user, db=db)
+    item = next(item for item in overview["calendar_items"] if item["id"] == f"task:{task.id}")
+    assert item["date"] == datetime.now(timezone.utc).date().isoformat()
+    assert item["is_unscheduled"] is True
+    assert item["is_overdue"] is False
+
+
+@pytest.mark.asyncio
+async def test_past_open_task_has_calendar_overdue_metadata(session):
+    db, user, course, _ = session
+    _, task = await _activate_plan_with_task(db, user, course, task_type="PRACTICE")
+    task.scheduled_for = datetime.now(timezone.utc) - timedelta(days=3)
+    await db.commit()
+
+    overview = await learning_home_overview(user=user, db=db)
+    item = next(item for item in overview["calendar_items"] if item["id"] == f"task:{task.id}")
+    assert item["is_overdue"] is True
+    assert item["overdue_days"] == 3
