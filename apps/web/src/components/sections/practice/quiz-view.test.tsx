@@ -16,7 +16,7 @@ vi.mock("@/lib/api", async () => {
     },
     {
       id: "p2",
-      question_type: "fill_blank",
+      question_type: "short_answer",
       question: "2 + 2 = ?",
       options: { a: "3", b: "4", c: "5", d: "6" },
       correct_answer: "b",

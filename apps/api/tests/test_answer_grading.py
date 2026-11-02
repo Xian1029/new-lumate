@@ -165,3 +165,14 @@ def test_measurement_limits_still_reject_wrong_limit_or_verdict():
         student_answer="最大值40.05mm，最小值39.95mm，39.96mm不合格",
         expected_answer=reference,
     ) is False
+
+
+def test_number_line_interaction_answer_supports_common_prompt_wording():
+    result = asyncio.run(grade_answer(
+        question_type="short_answer",
+        student_answer="数轴标记：-2、0、3/4\n原点、正方向、单位长度",
+        expected_answer="在数轴上正确标出 -2、0、3/4。",
+        question_context={"question": "在数轴上标出 -2、0、3/4 这三个数。"},
+    ))
+    assert result.is_correct is True
+    assert result.match_type == MatchType.STRUCTURED_EQUIVALENT

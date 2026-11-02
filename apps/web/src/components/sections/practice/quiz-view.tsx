@@ -21,6 +21,8 @@ import { updateUnlockContext, getUnlockContext } from "@/lib/block-system/featur
 import { QuizOptions } from "./quiz-options";
 import { QuizResult } from "./quiz-result";
 import { useQuizPersistence } from "./use-quiz-persistence";
+import { isNumberLineDrawingQuestion, NumberLineAnswer } from "./number-line-answer";
+import { FillBlankAnswer } from "./fill-blank-answer";
 
 interface QuizViewProps {
   courseId: string;
@@ -725,6 +727,43 @@ export function QuizView({
             submitting={submitting}
             onOptionClick={handleOptionClick}
           />
+        ) : ["tf", "true_false", "boolean", "bool"].includes(problem.question_type) ? (
+          <form
+            className="space-y-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!textAnswer || result || submitting || answeredMap[problem.id]?.answer) return;
+              void handleOptionClick(textAnswer);
+            }}
+          >
+            <div className="grid grid-cols-2 gap-3" role="group" aria-label="判断题选项">
+              {["正确", "错误"].map((option) => {
+                const selected = textAnswer === option;
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => setTextAnswer(option)}
+                    disabled={!!result || submitting || !!answeredMap[problem.id]?.answer}
+                    aria-pressed={selected}
+                    className={`rounded-xl border px-4 py-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-60 ${
+                      selected
+                        ? "border-brand bg-brand/10 text-brand shadow-sm"
+                        : "border-border bg-background text-foreground hover:border-brand/40 hover:bg-muted/40"
+                    }`}
+                  >
+                    <span className="mr-2" aria-hidden="true">{option === "正确" ? "✓" : "×"}</span>
+                    {option}
+                  </button>
+                );
+              })}
+            </div>
+            {!result && !answeredMap[problem.id]?.answer ? (
+              <Button type="submit" size="sm" disabled={submitting || !textAnswer}>
+                {submitting ? `${t("quiz.coding.submitting")}...` : t("quiz.submitAnswer")}
+              </Button>
+            ) : null}
+          </form>
         ) : (
           <form
             className="space-y-2"
@@ -735,30 +774,47 @@ export function QuizView({
               void handleOptionClick(answer);
             }}
           >
-            <textarea
-              rows={3}
-              className="w-full resize-y rounded-xl border border-border bg-background px-3 py-2 text-sm leading-relaxed shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
-              value={textAnswer}
-              onChange={(event) => setTextAnswer(event.target.value)}
-              placeholder={t("quiz.textAnswerPlaceholder")}
-              disabled={!!result || submitting || !!answeredMap[problem.id]?.answer}
-              aria-label={t("quiz.textAnswerLabel")}
-              onKeyDown={(event) => {
-                // A plain Enter adds a new line so children can finish a full
-                // explanation. Ctrl/Cmd + Enter is the optional quick-submit.
-                if (
-                  event.key === "Enter" &&
-                  (event.ctrlKey || event.metaKey) &&
-                  !event.nativeEvent.isComposing
-                ) {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
-            />
-            <p className="text-[11px] text-muted-foreground">
-              {t("quiz.textAnswerHint")}
-            </p>
+            {isNumberLineDrawingQuestion(problem.question) ? (
+              <NumberLineAnswer
+                value={textAnswer}
+                onChange={setTextAnswer}
+                disabled={!!result || submitting || !!answeredMap[problem.id]?.answer}
+              />
+            ) : problem.question_type === "fill_blank" ? (
+              <FillBlankAnswer
+                question={problem.question}
+                value={textAnswer}
+                onChange={setTextAnswer}
+                disabled={!!result || submitting || !!answeredMap[problem.id]?.answer}
+              />
+            ) : (
+              <>
+                <textarea
+                  rows={3}
+                  className="w-full resize-y rounded-xl border border-border bg-background px-3 py-2 text-sm leading-relaxed shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+                  value={textAnswer}
+                  onChange={(event) => setTextAnswer(event.target.value)}
+                  placeholder={t("quiz.textAnswerPlaceholder")}
+                  disabled={!!result || submitting || !!answeredMap[problem.id]?.answer}
+                  aria-label={t("quiz.textAnswerLabel")}
+                  onKeyDown={(event) => {
+                    // A plain Enter adds a new line so children can finish a full
+                    // explanation. Ctrl/Cmd + Enter is the optional quick-submit.
+                    if (
+                      event.key === "Enter" &&
+                      (event.ctrlKey || event.metaKey) &&
+                      !event.nativeEvent.isComposing
+                    ) {
+                      event.preventDefault();
+                      event.currentTarget.form?.requestSubmit();
+                    }
+                  }}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  {t("quiz.textAnswerHint")}
+                </p>
+              </>
+            )}
             {!result && !answeredMap[problem.id]?.answer && (
               <Button
                 type="submit"

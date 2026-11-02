@@ -230,7 +230,10 @@ _RELATION_NUMBER_LIST = rf"{_RELATION_NUMBER}(?:\s*(?:、|,|，|和|及|与)\s*{
 
 def _number_line_values_from_question(question: str) -> Optional[frozenset[Fraction]]:
     """Read the explicit values between “表示” and “这…个数” in a drawing task."""
-    if not re.search(r"(?:画出|作图).{0,12}数轴", question):
+    if not re.search(
+        r"(?:画出|作出|作图).{0,16}数轴|数轴上.{0,12}(?:表示|标出|标记)",
+        question,
+    ):
         return None
     text = re.sub(
         r"([+-]?)\s*\\d?frac\{(\d+)\}\{(\d+)\}",
@@ -240,7 +243,10 @@ def _number_line_values_from_question(question: str) -> Optional[frozenset[Fract
         )),
         question,
     ).replace("\\", "").replace("$", "")
-    section = re.search(r"表示\s*(.+?)\s*这(?:些|[一二三四五六七八九十\d]+个)数", text)
+    section = re.search(
+        r"(?:表示|标出|标记)\s*(.+?)\s*这(?:些|[一二三四五六七八九十\d]+个)数",
+        text,
+    )
     if not section:
         return None
     tokens = re.findall(r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:/\d+)?", section.group(1))
