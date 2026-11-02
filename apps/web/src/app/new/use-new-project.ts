@@ -291,7 +291,7 @@ export function useNewProject() {
   const startParsing = useCallback(async () => {
     const unresolved = (uploadPlan?.unclassified ?? []).filter((file) => !fileAssignments[file.filename]);
     if (unresolved.length > 0) {
-      setParseLogs([{ text: `请先确认 ${unresolved.map((file) => `「${file.filename}」`).join("、")} 的学科归属。`, color: "text-destructive" }]);
+      setParseLogs([{ text: `请先确认 ${unresolved.map((file) => `「${file.filename}」`).join("、")} 的学习空间归属。`, color: "text-destructive" }]);
       return;
     }
     setStep("parsing");
