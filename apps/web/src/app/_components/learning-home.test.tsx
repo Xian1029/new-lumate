@@ -76,4 +76,14 @@ describe("learning home protected features", () => {
     expect(screen.getByText("已完成 2 个学习内容")).toBeInTheDocument();
     expect(screen.getByText("共 8 个学习内容")).toBeInTheDocument();
   });
+
+  it("describes a completed day with concrete task language", () => {
+    render(<DailyMomentum overview={{ ...overview, today_summary: { estimated_minutes: 30, completed_count: 2, total_count: 2 }, learning_summary: { ...overview.learning_summary, review_due_count: 0, active_workspace_count: 2 } }} />);
+    expect(screen.getByText("今日学习进度")).toBeInTheDocument();
+    expect(screen.getByText("今日目标已完成")).toBeInTheDocument();
+    expect(screen.getByText("今天安排的 2 项任务已全部完成，记得适当休息。")).toBeInTheDocument();
+    expect(screen.getByText("今日已完成 2 项")).toBeInTheDocument();
+    expect(screen.getByText("今日共计 2 项")).toBeInTheDocument();
+    expect(screen.getByText("暂无待复习内容")).toBeInTheDocument();
+  });
 });
