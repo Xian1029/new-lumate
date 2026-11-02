@@ -682,6 +682,86 @@ def _bounded_mass_range_match(student: str, expected: str) -> bool | None:
     )
 
 
+_MEASUREMENT_UNIT = r"(?:kg|km|cm|mm|g|m|千克|公斤|千米|厘米|毫米|克|米)"
+_MEASUREMENT_VALUE = rf"[+-]?(?:\d+(?:\.\d*)?|\.\d+)\s*{_MEASUREMENT_UNIT}(?![A-Za-z])"
+
+
+def _labelled_measurement(value: str, labels: tuple[str, ...]) -> tuple[float, str] | None:
+    """Read a value attached to a semantic label, independent of word order."""
+    text = normalize_answer(value)
+    label_pattern = "|".join(map(re.escape, labels))
+    patterns = (
+        rf"(?:{label_pattern}).{{0,12}}?({_MEASUREMENT_VALUE})",
+        rf"({_MEASUREMENT_VALUE}).{{0,12}}?(?:{label_pattern})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        parsed = _parse_numeric_answer(match.group(1))
+        if parsed:
+            number, unit = parsed
+            return number, unit or ""
+    return None
+
+
+def _measurement_limits_with_verdict_match(student: str, expected: str) -> bool | None:
+    """Compare upper/lower measurement limits and an acceptance conclusion."""
+    upper_labels = ("最大值", "上限", "最大", "upper limit", "maximum")
+    lower_labels = ("最小值", "下限", "最小", "lower limit", "minimum")
+    s_upper = _labelled_measurement(student, upper_labels)
+    s_lower = _labelled_measurement(student, lower_labels)
+    e_upper = _labelled_measurement(expected, upper_labels)
+    e_lower = _labelled_measurement(expected, lower_labels)
+    if not all((s_upper, s_lower, e_upper, e_lower)):
+        return None
+
+    def same(left: tuple[float, str], right: tuple[float, str]) -> bool:
+        return left[1] == right[1] and math.isclose(
+            left[0], right[0], rel_tol=_DEFAULT_REL_TOL, abs_tol=_DEFAULT_ABS_TOL,
+        )
+
+    if not same(s_upper, e_upper) or not same(s_lower, e_lower):
+        return False
+
+    def verdict(text: str) -> bool | None:
+        normalized = normalize_answer(text)
+        if re.search(r"不合格|不在.{0,8}范围|超出.{0,8}范围", normalized):
+            return False
+        if re.search(r"合格|在.{0,8}范围|在.{0,8}区间", normalized):
+            return True
+        return None
+
+    s_verdict, e_verdict = verdict(student), verdict(expected)
+    if e_verdict is not None and s_verdict is None:
+        return False
+    return e_verdict is None or s_verdict == e_verdict
+
+
+def _single_signed_context_quantity_match(student: str, expected: str) -> bool:
+    """Accept a signed contextual result without requiring stem facts repeated."""
+    unit_pattern = "|".join(map(re.escape, ("km", "m", "cm", "mm", "千米", "米", "厘米", "毫米")))
+    pattern = re.compile(
+        rf"([+\-]\s*(?:\d+(?:\.\d*)?|\.\d+))\s*({unit_pattern})(?![A-Za-z])",
+        re.IGNORECASE,
+    )
+
+    def values(text: str) -> set[tuple[float, str]]:
+        result: set[tuple[float, str]] = set()
+        for raw_number, raw_unit in pattern.findall(normalize_answer(text)):
+            unit = {
+                "千米": "km", "米": "m", "厘米": "cm", "毫米": "mm",
+            }.get(raw_unit.lower(), raw_unit.lower())
+            result.add((float(raw_number.replace(" ", "")), unit))
+        return result
+
+    student_values, expected_values = values(student), values(expected)
+    if len(student_values) != 1 or not student_values.issubset(expected_values):
+        return False
+    context_words = ("向左", "向右", "正方向", "负方向", "正数", "负数")
+    return any(word in student for word in context_words) and any(word in expected for word in context_words)
+
+
 def _grade_objective(question_type: str, student: str, expected: str, options: Any) -> GradingResult:
     """MC / select-all / matching / true-false: deterministic only."""
     s_norm = normalize_answer(student)
@@ -848,14 +928,29 @@ async def grade_answer(
             "判断结论与质量范围一致" if bounded_range else "判断结论或质量范围不一致",
         )
 
+    limits_match = _measurement_limits_with_verdict_match(s_structured, e_structured)
+    if limits_match is not None:
+        return _single_result(
+            limits_match,
+            MatchType.STRUCTURED_EQUIVALENT if limits_match else MatchType.INCORRECT,
+            normalize_answer(s_structured), normalize_answer(e_structured),
+            "上下限与判断结论一致" if limits_match else "请检查上下限或合格性判断",
+        )
+
+    # Mathematical facts do not depend on whether the generator labelled the
+    # same response as short_answer or free_response.
+    if signed_quantities_equivalent(s_structured, e_structured):
+        return _single_result(True, MatchType.NUMERIC_EQUIVALENT, normalize_answer(s_structured),
+                              normalize_answer(e_structured), "带符号数量与实际含义一致")
+    if _single_signed_context_quantity_match(s_structured, e_structured):
+        return _single_result(True, MatchType.STRUCTURED_EQUIVALENT, normalize_answer(s_structured),
+                              normalize_answer(e_structured), "方向与带符号数量一致")
+
     # Whole-answer deterministic shortcuts for worked solutions (free_response).
     if qt == "free_response":
         if arithmetic_work_equivalent(s_structured, e_structured):
             return _single_result(True, MatchType.NUMERIC_EQUIVALENT, normalize_answer(s_structured),
                                   normalize_answer(e_structured), "演算过程与结果等价")
-        if signed_quantities_equivalent(s_structured, e_structured):
-            return _single_result(True, MatchType.NUMERIC_EQUIVALENT, normalize_answer(s_structured),
-                                  normalize_answer(e_structured), "带符号数量一致")
         if algebraic_expressions_equivalent(s_structured, e_structured):
             return _single_result(True, MatchType.NORMALIZED_EXACT, normalize_answer(s_structured),
                                   normalize_answer(e_structured), "代数式书写等价")
@@ -990,10 +1085,15 @@ def grade_answer_deterministic(
     bounded_range = _bounded_mass_range_match(s_structured, e_structured)
     if bounded_range is not None:
         return bounded_range
+    limits_match = _measurement_limits_with_verdict_match(s_structured, e_structured)
+    if limits_match is not None:
+        return limits_match
+    if signed_quantities_equivalent(s_structured, e_structured):
+        return True
+    if _single_signed_context_quantity_match(s_structured, e_structured):
+        return True
     if qt == "free_response":
         if arithmetic_work_equivalent(s_structured, e_structured):
-            return True
-        if signed_quantities_equivalent(s_structured, e_structured):
             return True
         if algebraic_expressions_equivalent(s_structured, e_structured):
             return True

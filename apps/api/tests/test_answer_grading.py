@@ -125,3 +125,43 @@ def test_direction_correction_does_not_accept_unsigned_or_wrong_sign_fix():
         student_answer="正确表示应该为：向左走60m记作+60m",
         expected_answer=reference,
     ) is False
+
+
+def test_short_answer_accepts_signed_deviation_facts_with_different_wording():
+    reference = "比标准质量少30g，记作-30g；偏差-27g表示比标准质量少27g。"
+    answer = "-30g\n-27g是指这箱橘子比标准质量少27g"
+    assert grade_answer_deterministic(
+        question_type="short_answer", student_answer=answer, expected_answer=reference,
+    ) is True
+
+
+def test_measurement_limits_accept_concise_correct_conclusion():
+    reference = "最大值为40.05mm，最小值为39.95mm；39.96mm在39.95mm到40.05mm之间，所以合格。"
+    answer = "最大值为40.05mm\n最小值为39.95mm\n直径39.96mm的球合格，该直径在最大值与最小值之间"
+    result = asyncio.run(grade_answer(
+        question_type="short_answer", student_answer=answer, expected_answer=reference,
+    ))
+    assert result.is_correct is True
+    assert result.match_type == MatchType.STRUCTURED_EQUIVALENT
+
+
+def test_direction_answer_accepts_required_signed_result_without_repeating_stem():
+    reference = "向右为正，向左走60m应记作-60m。"
+    answer = "-60m\n向右为正数，所以向左走为负数。"
+    assert grade_answer_deterministic(
+        question_type="short_answer", student_answer=answer, expected_answer=reference,
+    ) is True
+
+
+def test_measurement_limits_still_reject_wrong_limit_or_verdict():
+    reference = "最大值为40.05mm，最小值为39.95mm；39.96mm合格。"
+    assert grade_answer_deterministic(
+        question_type="short_answer",
+        student_answer="最大值40.06mm，最小值39.95mm，39.96mm合格",
+        expected_answer=reference,
+    ) is False
+    assert grade_answer_deterministic(
+        question_type="short_answer",
+        student_answer="最大值40.05mm，最小值39.95mm，39.96mm不合格",
+        expected_answer=reference,
+    ) is False
