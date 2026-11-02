@@ -13,6 +13,7 @@ Internal implementation lives in:
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
 import threading
 import time
 import logging
@@ -37,6 +38,29 @@ from services.llm.providers.anthropic_client import (  # noqa: F401
 from services.llm.providers.mock_client import MockLLMClient  # noqa: F401
 
 logger = logging.getLogger(__name__)
+
+# Per-request DeepSeek client selected from encrypted database credentials.
+# ContextVar keeps concurrent users isolated and is inherited by child tasks
+# created during the same request without mutating the global registry.
+_request_llm_client: ContextVar[LLMClient | None] = ContextVar("request_llm_client", default=None)
+
+
+def set_request_deepseek_key(api_key: str | None) -> None:
+    """Bind the effective DeepSeek credential to the current request context."""
+    client = None
+    if api_key:
+        client = OpenAIClient(
+            api_key,
+            "deepseek-chat",
+            base_url="https://api.deepseek.com/v1",
+            name="deepseek-user",
+            trust_env=settings.llm_trust_env,
+        )
+    _request_llm_client.set(client)
+
+
+def get_request_llm_client() -> LLMClient | None:
+    return _request_llm_client.get()
 
 
 class LLMConfigurationError(RuntimeError):
@@ -390,6 +414,9 @@ def get_llm_client(provider: str | None = None) -> LLMClient:
     With circuit breaker fallback: if primary is down, automatically
     tries the next available provider.  Thread-safe initialization.
     """
+    request_client = get_request_llm_client()
+    if request_client is not None:
+        return request_client
     global _registry
     if _registry is None:
         with _registry_lock:
