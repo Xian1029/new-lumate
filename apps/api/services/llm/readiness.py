@@ -6,7 +6,7 @@ from typing import Any
 
 from config import settings
 from libs.exceptions import LLMUnavailableError, LLMInsufficientBalanceError
-from services.llm.router import get_registry
+from services.llm.router import get_registry, get_request_llm_client
 
 
 def _status_message(feature_name: str, status: str, primary_name: str | None) -> str:
@@ -69,6 +69,8 @@ async def get_llm_runtime_status(*, probe_if_needed: bool = True) -> dict[str, A
 
 async def ensure_llm_ready(feature_name: str, *, allow_degraded: bool = False) -> None:
     """Fail fast when a user-facing AI feature would run against mock or unhealthy LLMs."""
+    if get_request_llm_client() is not None:
+        return
     runtime = await get_llm_runtime_status()
     status = runtime["status"]
     if status == "ready" or (allow_degraded and status == "degraded"):
