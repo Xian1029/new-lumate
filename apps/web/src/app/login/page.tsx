@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { BookOpen, BrainCircuit, Eye, EyeOff, Loader2, LockKeyhole, Sparkles, Target } from "lucide-react";
+import { BookOpen, BrainCircuit, Eye, EyeOff, Loader2, LockKeyhole, Sparkles, Target, UserRound } from "lucide-react";
 import { login } from "@/lib/account";
 
 export default function LoginPage() {
@@ -38,11 +38,11 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#f5f3ed] p-4 sm:p-7 lg:grid lg:place-items-center">
+    <main className="relative grid min-h-screen place-items-center overflow-hidden bg-[#f5f3ed] p-3 sm:p-6 lg:p-8">
       <div className="pointer-events-none absolute -left-24 -top-28 h-80 w-80 rounded-full bg-[#b9d8c5]/40 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-32 -right-24 h-96 w-96 rounded-full bg-[#f2c980]/30 blur-3xl" />
 
-      <section className="relative mx-auto grid min-h-[calc(100vh-2rem)] w-full max-w-6xl overflow-hidden rounded-[2rem] border border-white/80 bg-white shadow-[0_28px_90px_rgba(43,61,52,0.12)] sm:min-h-[760px] lg:min-h-[680px] lg:grid-cols-[1.08fr_0.92fr]">
+      <section className="relative mx-auto grid w-full max-w-[520px] overflow-hidden rounded-[1.75rem] border border-white/80 bg-white shadow-[0_24px_70px_rgba(43,61,52,0.12)] lg:min-h-[680px] lg:max-w-6xl lg:grid-cols-[1.08fr_0.92fr] lg:rounded-[2rem]">
         <div className="relative hidden overflow-hidden bg-[#233a32] p-12 text-white lg:flex lg:flex-col lg:justify-between">
           <div className="absolute inset-0 opacity-20" style={{ backgroundImage: "radial-gradient(circle at 1px 1px, #ffffff 1px, transparent 0)", backgroundSize: "28px 28px" }} />
           <div className="absolute -right-24 top-28 h-72 w-72 rounded-full border border-white/20" />
@@ -70,13 +70,13 @@ export default function LoginPage() {
           <p className="relative text-xs text-white/35">专注当下 · 保持好奇 · 稳步成长</p>
         </div>
 
-        <div className="flex items-center justify-center px-6 py-10 sm:px-12 lg:px-16">
+        <div className="flex items-center justify-center px-6 py-8 sm:px-12 sm:py-10 lg:px-16">
           <div className="w-full max-w-sm">
-            <div className="mb-10 flex items-center gap-3 lg:hidden">
+            <div className="mb-8 flex items-center gap-3 lg:hidden">
               <span className="grid h-11 w-11 place-items-center rounded-2xl bg-[#233a32] text-[#f3cf88]"><Sparkles className="h-5 w-5" /></span>
               <div><p className="text-xl font-semibold text-[#233a32]">Lumate</p><p className="text-xs text-muted-foreground">AI 学习伙伴</p></div>
             </div>
-            <div className="mb-8 space-y-2">
+            <div className="mb-7 space-y-2">
               <p className="text-sm font-medium text-[#71897d]">欢迎回来</p>
               <h2 className="text-3xl font-bold tracking-tight text-[#202b27]">继续今天的学习</h2>
               <p className="text-sm text-muted-foreground">登录后查看你的学习空间和今日任务。</p>
@@ -85,15 +85,15 @@ export default function LoginPage() {
               <label className="block space-y-2">
                 <span className="text-sm font-medium text-[#34443d]">用户名</span>
                 <div className="flex h-13 items-center rounded-xl border border-[#deddd7] bg-[#fbfaf7] px-4 transition focus-within:border-[#789081] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#789081]/10">
-                  <BookOpen className="mr-3 h-4.5 w-4.5 text-[#8d9993]" />
-                  <input required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="请输入用户名" className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[#a8aaa7]" />
+                  <UserRound className="mr-3 h-4.5 w-4.5 shrink-0 text-[#8d9993]" />
+                  <input required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="请输入用户名" className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none focus-visible:outline-none placeholder:text-[#a8aaa7]" />
                 </div>
               </label>
               <label className="block space-y-2">
                 <span className="text-sm font-medium text-[#34443d]">密码</span>
                 <div className="flex h-13 items-center rounded-xl border border-[#deddd7] bg-[#fbfaf7] px-4 transition focus-within:border-[#789081] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#789081]/10">
-                  <LockKeyhole className="mr-3 h-4.5 w-4.5 text-[#8d9993]" />
-                  <input required autoComplete="current-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[#a8aaa7]" />
+                  <LockKeyhole className="mr-3 h-4.5 w-4.5 shrink-0 text-[#8d9993]" />
+                  <input required autoComplete="current-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none focus-visible:outline-none placeholder:text-[#a8aaa7]" />
                   <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "隐藏密码" : "显示密码"} className="rounded-lg p-1.5 text-[#8d9993] transition hover:bg-[#eef1ed] hover:text-[#53695e]">
                     {showPassword ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
                   </button>
