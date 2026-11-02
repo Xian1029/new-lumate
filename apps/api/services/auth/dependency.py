@@ -39,6 +39,33 @@ async def _execute_user_query(db: AsyncSession, query):
         raise
 
 
+async def _bind_user_ai_credential(db: AsyncSession, user: User, request: Request | None) -> None:
+    """Resolve platform-first, personal-second AI credentials for this request."""
+    from models.ai_settings import PlatformAISettings, UserAISettings
+    from services.llm.router import set_request_deepseek_key
+
+    platform = (await db.execute(
+        select(PlatformAISettings).where(PlatformAISettings.id == 1)
+    )).scalar_one_or_none()
+    effective_key = None
+    source = None
+    if platform and platform.platform_key_enabled:
+        effective_key = platform.get_key()
+        if effective_key:
+            source = "platform"
+    if not effective_key and (platform is None or platform.allow_personal_keys):
+        personal = (await db.execute(
+            select(UserAISettings).where(UserAISettings.user_id == user.id)
+        )).scalar_one_or_none()
+        if personal:
+            effective_key = personal.get_key()
+            if effective_key:
+                source = "personal"
+    set_request_deepseek_key(effective_key)
+    if request is not None:
+        request.state.ai_key_source = source
+
+
 async def get_current_user(
     request: Request = None,
     db: AsyncSession = Depends(get_db),
@@ -62,6 +89,7 @@ async def get_current_user(
         if request is not None:
             request.state.user_id = str(user.id)
             request.state.deployment_mode = settings.deployment_mode
+        await _bind_user_ai_credential(db, user, request)
         return user
 
     if not settings.auth_enabled:
@@ -107,6 +135,7 @@ async def get_current_user(
     if request is not None:
         request.state.user_id = str(user.id)
         request.state.deployment_mode = settings.deployment_mode
+    await _bind_user_ai_credential(db, user, request)
     return user
 
 
