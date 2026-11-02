@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { ArrowRight, CheckCircle2, KeyRound, Sparkles } from "lucide-react";
 import { useT } from "@/lib/i18n-context";
 import {
   getHealthStatus,
@@ -100,20 +101,7 @@ export default function SettingsPage() {
   }
 
   const accountAIReady = Boolean(accountAI?.effective_key_available);
-  const effectiveBlockers = (health?.local_beta_blockers ?? []).filter(
-    (item) => item !== "llm_unhealthy" && item !== "llm_not_ready",
-  );
-  const displayedHealth = health && accountAIReady ? {
-    ...health,
-    llm_status: "ready" as const,
-    llm_available: true,
-    llm_primary: "deepseek",
-    llm_providers: ["deepseek"],
-    llm_provider_health: { deepseek: true },
-    local_beta_blockers: effectiveBlockers,
-    local_beta_ready: effectiveBlockers.length === 0,
-  } : health;
-  const multiUserMode = health?.deployment_mode === "multi_user";
+  const singleUserMode = health?.deployment_mode === "single_user";
 
   return (
     <div className="min-h-screen bg-background">
@@ -132,15 +120,11 @@ export default function SettingsPage() {
       </header>
 
       <div className="max-w-4xl mx-auto p-6 md:p-10 space-y-8">
-        <RuntimeAlert health={displayedHealth} />
-
-        <RuntimeStatusSection
-          health={displayedHealth}
+        {singleUserMode ? <><RuntimeAlert health={health} /><RuntimeStatusSection
+          health={health}
           healthLoading={healthLoading}
           onRefresh={() => void loadHealth()}
-        />
-
-        {multiUserMode ? <section className="space-y-3"><h2 className="font-medium text-foreground">当前账号 AI 服务</h2><div className="rounded-xl border border-border bg-card p-5"><div className="flex flex-wrap items-center justify-between gap-4"><div><p className={`font-semibold ${accountAIReady ? "text-brand" : "text-destructive"}`}>{accountAIReady ? "AI 服务已可用" : "AI 服务尚未配置"}</p><p className="mt-1 text-sm text-muted-foreground">{accountAIReady ? `当前使用${accountAI?.effective_key_source === "platform" ? "平台统一 Key" : "个人 Key"}（${accountAI?.effective_provider || "deepseek"}），学习空间内的 AI 功能可正常调用。` : "请先完成 AI Key 配置，AI 笔记、学习计划和智能辅导才能使用。"}</p></div><button type="button" onClick={() => router.push(account?.role === "super_admin" ? "/admin/ai-settings" : "/settings/ai")} className="rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-brand-foreground">{account?.role === "super_admin" ? "前往平台 AI 设置" : "前往个人 AI 设置"}</button></div></div></section> : <><ProviderConnectionsSection
+        /><ProviderConnectionsSection
           runtimeConfig={runtimeConfig}
           runtimeLoading={runtimeLoading}
           provider={provider}
@@ -154,7 +138,21 @@ export default function SettingsPage() {
           onRefreshConfig={() => void loadRuntimeConfig()}
           onRefreshHealth={() => void loadHealth()}
           setSavingRuntime={setSavingRuntime}
-        /></>}
+        /></> : <section className="overflow-hidden rounded-3xl border border-border/70 bg-card shadow-sm">
+          <div className="bg-gradient-to-br from-brand-muted/80 via-card to-amber-50/70 px-6 py-6 sm:px-7">
+            <div className="flex items-start gap-4">
+              <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-brand text-brand-foreground shadow-sm"><Sparkles className="size-5" /></span>
+              <div><p className="text-xs font-semibold tracking-[0.18em] text-brand">AI 服务</p><h2 className="mt-1 text-xl font-bold text-foreground">当前账号配置</h2><p className="mt-1 text-sm text-muted-foreground">用于 AI 笔记、学习计划、智能判题与学习助手。</p></div>
+            </div>
+          </div>
+          <div className="flex flex-col gap-5 px-6 py-6 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+            {!accountAI ? <div className="space-y-2"><div className="h-5 w-32 animate-pulse rounded bg-muted" /><div className="h-4 w-52 animate-pulse rounded bg-muted" /></div> : <div className="flex items-start gap-3">
+              <span className={`mt-0.5 grid size-8 shrink-0 place-items-center rounded-full ${accountAIReady ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{accountAIReady ? <CheckCircle2 className="size-4" /> : <KeyRound className="size-4" />}</span>
+              <div><p className="font-semibold text-foreground">{accountAIReady ? "AI 服务已连接" : "尚未配置可用的 AI Key"}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{accountAIReady ? `当前使用${accountAI.effective_key_source === "platform" ? "平台统一配置" : "个人配置"} · ${accountAI.effective_provider || "DeepSeek"}` : "完成配置后即可使用学习空间内的 AI 功能。"}</p></div>
+            </div>}
+            <button type="button" onClick={() => router.push(account?.role === "super_admin" ? "/admin/ai-settings" : "/settings/ai")} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition hover:opacity-90">{accountAIReady ? "管理 AI 配置" : "立即配置"}<ArrowRight className="size-4" /></button>
+          </div>
+        </section>}
 
         <AppearanceSection />
 
