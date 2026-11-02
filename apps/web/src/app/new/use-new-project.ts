@@ -311,6 +311,9 @@ export function useNewProject() {
       const baseMetadata = {
         ...buildMetadata(features, false, "", "upload"),
         learning_mode: learningMode,
+        // Persist the learner's naming decision. Parsers may enrich subject,
+        // grade and volume metadata, but must never replace this title.
+        name_source: projectName.trim() ? "user" : "inferred",
       };
 
       // Multi-subject split: when the plan detected more than one subject

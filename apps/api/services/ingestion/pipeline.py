@@ -440,9 +440,15 @@ async def run_ingestion_pipeline(
                                     sa.select(Course).where(Course.id == job.course_id)
                                 )
                                 course_obj = course_result.scalar_one_or_none()
-                                if course_obj:
+                                name_is_user_selected = (
+                                    isinstance(course_obj.metadata_, dict)
+                                    and course_obj.metadata_.get("name_source") == "user"
+                                ) if course_obj else False
+                                if course_obj and not name_is_user_selected:
                                     course_obj.name = deep_result.title
                                     logger.info("Auto-set course name from Canvas: %s", deep_result.title)
+                                elif course_obj:
+                                    logger.info("Kept user-selected course name: %s", course_obj.name)
                             except (
                                 sa.exc.SQLAlchemyError,
                                 ValueError,

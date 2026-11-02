@@ -374,6 +374,11 @@ async def update_course(
     course = await get_course_or_404(db, course_id, user_id=user.id)
     if body.name is not None:
         course.name = body.name
+        # A name submitted through the course update endpoint is an explicit
+        # learner choice and remains authoritative during later reprocessing.
+        renamed_metadata = dict(course.metadata_ or {})
+        renamed_metadata["name_source"] = "user"
+        course.metadata_ = renamed_metadata
     if body.description is not None:
         course.description = body.description
     if body.metadata is not None:
