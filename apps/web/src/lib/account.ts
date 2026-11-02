@@ -13,6 +13,5 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 }
 export const getMe = () => call<CurrentUser>("/me");
 export const login = (username: string, password: string) => call<CurrentUser>("/login", { method: "POST", body: JSON.stringify({ username, password }) });
-export const register = (username: string, password: string, name?: string) => call<CurrentUser>("/register", { method: "POST", body: JSON.stringify({ username, password, name }) });
 export const logout = () => call<void>("/logout", { method: "POST" });
 export const changePassword = (current_password: string, new_password: string) => call<CurrentUser>("/change-password", { method: "POST", body: JSON.stringify({ current_password, new_password }) });

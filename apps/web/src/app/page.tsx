@@ -29,6 +29,7 @@ export default function LearningHomePage() {
   const { overview, loading, error, reload } = useLearningHome();
   const [showNewSpaceButton, setShowNewSpaceButton] = useState(true);
   const [account, setAccount] = useState<CurrentUser | null>(null);
+  const [accessReady, setAccessReady] = useState(false);
   const navigate = (href: string) => router.push(href);
   // Await the authoritative task mutation before navigating.  The endpoint is
   // idempotent for IN_PROGRESS, so a retried click never turns into a 409.
@@ -51,9 +52,18 @@ export default function LearningHomePage() {
   }, []);
 
   useEffect(() => {
-    void getMe().then((user) => {
+    void getMe().then(async (user) => {
       setAccount(user);
-      if (user.must_change_password) router.replace("/change-password");
+      if (user.must_change_password) { router.replace("/change-password"); return; }
+      if (user.role === "student") {
+        const response = await fetch("/api/ai-settings/me", { credentials: "include" }).catch(() => null);
+        if (!response?.ok) { router.replace("/login"); return; }
+        const ai = await response.json();
+        if (!(ai.platform_key_configured && ai.platform_key_enabled) && !ai.personal_key_configured) {
+          router.replace("/settings/ai?welcome=1"); return;
+        }
+      }
+      setAccessReady(true);
     }).catch((error: Error) => {
       // /auth is intentionally absent in legacy single-user deployments.
       if (error.message.startsWith("401:")) router.replace("/login");
@@ -61,6 +71,7 @@ export default function LearningHomePage() {
   }, [router]);
 
   const empty = !loading && overview?.learning_spaces.length === 0;
+  if (!accessReady) return <main className="grid min-h-screen place-items-center bg-background text-sm text-muted-foreground">正在检查学习账号配置…</main>;
   const toggleNewSpaceButton = () => {
     const next = !showNewSpaceButton;
     setShowNewSpaceButton(next);

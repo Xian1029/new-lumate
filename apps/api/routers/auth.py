@@ -86,18 +86,10 @@ def _user_response(user: User) -> UserResponse:
     )
 
 
-@router.post("/register", response_model=UserResponse, status_code=201)
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    username = body.username.strip().lower()
-    if username == "admin":
-        raise HTTPException(status_code=400, detail="该用户名不可注册")
-    if (await db.execute(select(User).where(User.username == username))).scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="用户名已存在")
-    user = User(username=username, name=(body.name or username), role="student", hashed_password=hash_password(body.password))
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return _user_response(user)
+@router.post("/register", status_code=403)
+async def register():
+    """Public registration is intentionally disabled; admins create students."""
+    raise HTTPException(status_code=403, detail="暂不开放自主注册，请联系管理员创建账号")
 
 
 @router.post("/login", response_model=UserResponse)
