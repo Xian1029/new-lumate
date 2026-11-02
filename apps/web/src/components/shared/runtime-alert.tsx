@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, Database, X } from "lucide-react";
 import type { HealthStatus } from "@/lib/api";
 import { useT } from "@/lib/i18n-context";
@@ -13,6 +13,16 @@ interface RuntimeAlertProps {
 export function RuntimeAlert({ health, className }: RuntimeAlertProps) {
   const t = useT();
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [accountAIAvailable, setAccountAIAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/ai-settings/me", { credentials: "include" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((settings) => { if (active) setAccountAIAvailable(Boolean(settings?.effective_key_available)); })
+      .catch(() => { if (active) setAccountAIAvailable(false); });
+    return () => { active = false; };
+  }, []);
 
   if (!health) {
     return null;
@@ -39,7 +49,7 @@ export function RuntimeAlert({ health, className }: RuntimeAlertProps) {
   // Sandbox warning removed — Docker/Podman is optional and most users don't need it.
   // Code execution gracefully degrades with a per-action message when attempted.
 
-  if (health.llm_status === "mock_fallback" || health.llm_status === "configuration_required") {
+  if (accountAIAvailable !== true && (health.llm_status === "mock_fallback" || health.llm_status === "configuration_required")) {
     warnings.push({
       key: "llm",
       title: t("runtimeAlert.llmTitle"),
@@ -50,7 +60,7 @@ export function RuntimeAlert({ health, className }: RuntimeAlertProps) {
       Icon: AlertTriangle,
       dismissable: false,
     });
-  } else if (health.llm_status === "degraded") {
+  } else if (accountAIAvailable !== true && health.llm_status === "degraded") {
     warnings.push({
       key: "llm-degraded",
       title: t("runtimeAlert.llmDegradedTitle"),
