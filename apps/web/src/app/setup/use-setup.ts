@@ -439,19 +439,6 @@ export function useSetup() {
     }
   }, [router]);
 
-  // ── Skip content (empty workspace) ──
-  const skipContent = useCallback(async () => {
-    try {
-      const { metadata } = buildCourseMetadata({ length: 0 }, "", null, null, false);
-      const course = await addCourse(projectName.trim() || t("new.untitledProject"), undefined, metadata);
-      await applyDefaultPreferences();
-      localStorage.setItem("opentutor_onboarded", "true");
-      router.push(`/course/${course.id}`);
-    } catch (err) {
-      setNameError((err as Error).message);
-    }
-  }, [addCourse, projectName, router, t]);
-
   const quickStart = useCallback(async () => {
     setQuickStartLoading(true);
     setSelectedTemplate(QUICK_START_TEMPLATE);
@@ -490,7 +477,7 @@ export function useSetup() {
     selectedTemplate, setSelectedTemplate,
     selectedMode, setSelectedMode,
     // Actions
-    startLearning, confirmTemplate, enterWorkspace, skipContent,
+    startLearning, confirmTemplate, enterWorkspace,
     tryDemo, demoLoading,
     quickStart, quickStartLoading,
   };

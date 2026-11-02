@@ -20,10 +20,10 @@ const overview: LearningHomeOverview = {
 };
 
 describe("learning home protected features", () => {
-  it("keeps both first-learning-space creation paths visible", () => {
+  it("offers upload creation without the manual workspace entry", () => {
     render(<FirstSpaceEmptyState onNavigate={navigate} />);
     expect(screen.getByRole("button", { name: "上传学习资料" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "手动创建学习空间" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "手动创建学习空间" })).not.toBeInTheDocument();
   });
 
   it("renders every conditional protected entry when its server data exists", async () => {

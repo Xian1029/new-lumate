@@ -26,7 +26,6 @@ interface ContentStepProps {
   onQuickStart: () => void;
   quickStartLoading: boolean;
   onStartLearning: () => void;
-  onSkip: () => void;
   t: (key: string) => string;
 }
 
@@ -36,7 +35,7 @@ export function ContentStep({
   url, onUrlChange, urlError, onValidateUrl,
   autoScrape, onAutoScrapeChange,
   isCanvasDetected, canvasSessionValid, canvasAuthenticating,
-  onAuthCanvas, onQuickStart, quickStartLoading, onStartLearning, onSkip, t,
+  onAuthCanvas, onQuickStart, quickStartLoading, onStartLearning, t,
 }: ContentStepProps) {
   const [tab, setTab] = useState<ContentTab>("upload");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -237,7 +236,7 @@ export function ContentStep({
       )}
 
       {/* Actions: each choice states both the action and its outcome. */}
-      <div className="grid gap-2 pt-2 sm:grid-cols-3">
+      <div className="grid gap-2 pt-2 sm:grid-cols-2">
         <button
           type="button"
           onClick={onQuickStart}
@@ -263,14 +262,6 @@ export function ContentStep({
         >
           <span className="block text-sm font-semibold text-foreground">{t("setup.startLearning")}</span>
           <span className="mt-1 block text-xs leading-5 text-muted-foreground">{t("setup.startLearningHint")}</span>
-        </button>
-        <button
-          type="button"
-          onClick={onSkip}
-          className="min-h-20 rounded-xl border border-border bg-background p-3 text-left transition-colors hover:border-brand/50 hover:bg-muted/40"
-        >
-          <span className="block text-sm font-semibold text-foreground">{t("setup.skipContent")}</span>
-          <span className="mt-1 block text-xs leading-5 text-muted-foreground">{t("setup.skipContentHint")}</span>
         </button>
       </div>
     </div>

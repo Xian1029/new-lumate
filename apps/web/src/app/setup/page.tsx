@@ -74,7 +74,6 @@ function SetupInner() {
               onQuickStart={s.quickStart}
               quickStartLoading={s.quickStartLoading}
               onStartLearning={s.startLearning}
-              onSkip={s.skipContent}
               t={s.t}
             />
           )}

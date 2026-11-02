@@ -77,96 +77,9 @@ export function CourseSpacesSection({
                     <span className={`font-bold text-xs ${color.text}`}>{initials}</span>
                   </div>
                   <div className="flex flex-col gap-0.5 flex-1 min-w-0">
-                    <span className="font-semibold text-sm text-foreground truncate group-hover:text-brand transition-colors">{course.name}</span>
-                    <span className="text-[11px] text-muted-foreground">{formatDate(course.updated_at ?? course.created_at)}</span>
-                  </div>
-                  <ArrowRight className="mr-7 size-4 shrink-0 text-muted-foreground/0 transition-all group-hover:text-muted-foreground" />
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-muted-foreground line-clamp-1 flex-1">
-                    {course.description || `${t("dashboard.recentActivity")}：${getFriendlySceneLabel(course.last_scene_id, t)}`}
-                  </span>
-                  <ModeBadge mode={getCourseMode(course)} />
-                </div>
-                {hasPending && (
-                  <span className="inline-flex w-fit rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-warning-muted text-warning">
-                    {locale === "zh"
-                      ? `${course.pending_approval_count}${t("dashboard.pendingApprovalsBadge")}`
-                      : `${course.pending_approval_count} ${t("dashboard.pendingApprovalsBadge")}`}
-                  </span>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => setDeleteTarget(course)}
-                aria-label={t("home.spaceDelete.action").replace("{name}", course.name)}
-                title={t("general.delete")}
-                className="absolute right-4 top-4 rounded-lg p-1.5 text-muted-foreground opacity-70 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/30 sm:opacity-0 sm:group-hover:opacity-100"
-              >
-                <Trash2 className="size-4" />
-              </button>
-            </div>
-          );
-        })}
+                  …4088 tokens truncated…span>
+        </button>
       </div>
-
-      <Dialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => {
-          if (!open && !deleting) setDeleteTarget(null);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("home.spaceDelete.title")}</DialogTitle>
-            <DialogDescription>
-              {deleteTarget
-                ? t("home.spaceDelete.description").replace("{name}", deleteTarget.name)
-                : ""}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setDeleteTarget(null)}
-              disabled={deleting}
-            >
-              {t("general.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={() => void confirmDelete()}
-              disabled={deleting}
-            >
-              {deleting && <Loader2 className="size-4 animate-spin" />}
-              {deleting ? t("home.spaceDelete.deleting") : t("home.spaceDelete.confirm")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </DashSection>
-  );
-}
-
-export function DashboardEmptyState({
-  onNavigate,
-  t,
-}: {
-  onNavigate: (path: string) => void;
-  t: (key: string) => string;
-}) {
-  return (
-    <div className="text-center py-24 flex flex-col items-center gap-5 animate-fade-in">
-      <div className="size-16 rounded-2xl bg-brand-muted flex items-center justify-center">
-        <BookOpen className="size-7 text-brand" />
-      </div>
-      <h2 className="text-lg font-bold text-foreground">{t("dashboard.empty")}</h2>
-      <p className="text-sm text-muted-foreground max-w-sm leading-relaxed">{t("dashboard.emptyDescription")}</p>
-      <button type="button" onClick={() => onNavigate("/setup?step=content")} className="h-11 px-7 bg-brand text-brand-foreground rounded-full text-sm font-medium hover:opacity-90 transition-all hover:shadow-md">
-        {t("dashboard.create")}
-      </button>
     </div>
   );
 }
