@@ -80,6 +80,60 @@ export function CourseSpacesSection({
                   …4088 tokens truncated…span>
         </button>
       </div>
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("home.spaceDelete.title")}</DialogTitle>
+            <DialogDescription>
+              {deleteTarget
+                ? t("home.spaceDelete.description").replace("{name}", deleteTarget.name)
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              disabled={deleting}
+            >
+              {t("general.cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void confirmDelete()}
+              disabled={deleting}
+            >
+              {deleting && <Loader2 className="size-4 animate-spin" />}
+              {deleting ? t("home.spaceDelete.deleting") : t("home.spaceDelete.confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </DashSection>
+  );
+}
+
+export function DashboardEmptyState({
+  onNavigate,
+  t,
+}: {
+  onNavigate: (path: string) => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <div className="text-center py-24 flex flex-col items-center gap-5 animate-fade-in">
+      <div className="size-16 rounded-2xl bg-brand-muted flex items-center justify-center">
+        <BookOpen className="size-7 text-brand" />
+      </div>
+      <h2 className="text-lg font-bold text-foreground">{t("dashboard.empty")}</h2>
+      <p className="text-sm text-muted-foreground max-w-sm leading-relaxed">{t("dashboard.emptyDescription")}</p>
     </div>
   );
 }

@@ -21,6 +21,7 @@ import { ttlCache } from "@/lib/cache";
 /** Cache key & TTL for the course overview list (dashboard). */
 const COURSES_CACHE_KEY = "courses:overview";
 const COURSES_TTL_MS = 60_000; // 60 seconds
+let contentTreeRequestId = 0;
 
 interface CourseState {
   courses: Course[];
@@ -69,6 +70,7 @@ export const useCourseStore = create<CourseState>((set, get) => ({
   },
 
   setActiveCourse: (course) => {
+    contentTreeRequestId += 1;
     set({ activeCourse: course, contentTree: [], contentTreeCourseId: null, error: null });
     if (course) {
       get().fetchContentTree(course.id);
@@ -96,10 +98,16 @@ export const useCourseStore = create<CourseState>((set, get) => ({
   },
 
   fetchContentTree: async (courseId) => {
+    const requestId = ++contentTreeRequestId;
+    if (get().contentTreeCourseId !== courseId) {
+      set({ contentTree: [], contentTreeCourseId: null });
+    }
     try {
       const tree = await getContentTree(courseId);
+      if (requestId !== contentTreeRequestId) return;
       set({ contentTree: tree, contentTreeCourseId: courseId, error: null });
     } catch (error) {
+      if (requestId !== contentTreeRequestId) return;
       const message = error instanceof Error ? error.message : t("ui.failed_load_content");
       set({ error: message });
     }

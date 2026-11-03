@@ -43,6 +43,32 @@ DEFAULT_USER_NAME = "Local User"
 
 
 def _serialize_content_tree(nodes: list[CourseContentTree]) -> list[ContentNodeResponse]:
+    chinese_numbers = {
+        "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+        "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+    }
+
+    def outline_sort_key(node: CourseContentTree) -> tuple:
+        title = (node.title or "").strip()
+        created_at = node.created_at
+        if created_at is None:
+            created_timestamp = 0.0
+        elif created_at.tzinfo is None:
+            created_timestamp = created_at.replace(tzinfo=timezone.utc).timestamp()
+        else:
+            created_timestamp = created_at.timestamp()
+        decimal = re.match(r"^(\d+)(?:[.．](\d+))?", title)
+        if decimal:
+            return (int(decimal.group(1)), int(decimal.group(2) or 0), node.order_index, created_timestamp, str(node.id))
+        chinese = re.match(r"^([一二三四五六七八九十])[、.．\s]", title)
+        if chinese:
+            return (chinese_numbers[chinese.group(1)], 0, node.order_index, created_timestamp, str(node.id))
+        # Every branch must return the same value types in every tuple slot.
+        # A generic Word heading used to put ``datetime`` in slot 3 while a
+        # numbered sibling put ``int`` there, crashing the whole outline with
+        # ``TypeError: '<' not supported between int and datetime``.
+        return (node.order_index, 0, node.order_index, created_timestamp, str(node.id))
+
     def is_front_matter(node: CourseContentTree) -> bool:
         title = normalize_textbook_outline_title(node.title or "").strip().lower()
         compact_title = re.sub(r"[\s:：·._-]+", "", title)
@@ -67,6 +93,21 @@ def _serialize_content_tree(nodes: list[CourseContentTree]) -> list[ContentNodeR
             ordinary_roots.append(node)
     orphan_ids = {node.id for group in source_orphans.values() for node in group}
 
+    # Old imports may contain one material root plus detached descendants from
+    # the same source. Attach them to that root at read time. A second
+    # synthetic wrapper made one uploaded Word file appear twice.
+    roots_by_source = {
+        (getattr(node, "source_file", None) or "").strip(): node
+        for node in ordinary_roots
+        if (getattr(node, "source_file", None) or "").strip()
+    }
+    adopted_orphans: dict[uuid.UUID, list[CourseContentTree]] = {}
+    for source_file in list(source_orphans):
+        existing_root = roots_by_source.get(source_file)
+        if existing_root is None:
+            continue
+        adopted_orphans[existing_root.id] = source_orphans.pop(source_file)
+
     by_parent: dict[uuid.UUID | None, list[CourseContentTree]] = {}
     for node in nodes:
         # Front matter should not be in the learner-facing course outline,
@@ -78,8 +119,11 @@ def _serialize_content_tree(nodes: list[CourseContentTree]) -> list[ContentNodeR
             continue
         by_parent.setdefault(node.parent_id, []).append(node)
 
+    for root_id, detached_nodes in adopted_orphans.items():
+        by_parent.setdefault(root_id, []).extend(detached_nodes)
+
     for siblings in by_parent.values():
-        siblings.sort(key=lambda item: (item.order_index, item.created_at))
+        siblings.sort(key=outline_sort_key)
 
     def build(node: CourseContentTree) -> ContentNodeResponse:
         return ContentNodeResponse(

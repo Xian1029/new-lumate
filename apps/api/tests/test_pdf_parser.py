@@ -2,7 +2,7 @@ import uuid
 
 from services.content_text import clean_course_text, has_unreadable_text, normalize_pdf_markdown
 from services.ingestion.classification import classify_by_content_heuristics, classify_by_filename
-from services.parser.pdf import _markdown_to_tree
+from services.parser.pdf import _markdown_to_tree, ensure_tree_parentage
 from services.parser.notes import build_fallback_notes
 
 
@@ -102,6 +102,48 @@ https://www.pblworks.org/about
     assert not any(title.startswith("http") for title in titles)
     assert not any(title.startswith("|") for title in titles)
     assert not any("服务与产品目录中" in title for title in titles)
+
+
+def test_word_style_headings_keep_their_original_parent_hierarchy() -> None:
+    course_id = uuid.uuid4()
+    nodes = _markdown_to_tree(
+        """# 自动化方案
+
+# 一、方案描述
+方案正文。
+
+# 任务拆解与规划机制
+
+## 2.1 意图识别与任务理解
+识别用户目标。
+
+## 2.2 规划与执行
+生成执行步骤。
+
+# 三、工具集成
+
+## 3.1 API 调用
+调用外部服务。""",
+        course_id,
+        "自动化方案.docx",
+    )
+
+    by_title = {node.title: node for node in nodes}
+    assert by_title["2.1 意图识别与任务理解"].parent_id == by_title["任务拆解与规划机制"].id
+    assert by_title["2.2 规划与执行"].parent_id == by_title["任务拆解与规划机制"].id
+    assert by_title["3.1 API 调用"].parent_id == by_title["三、工具集成"].id
+
+
+def test_persistence_boundary_repairs_detached_descendants() -> None:
+    course_id = uuid.uuid4()
+    nodes = _markdown_to_tree("# 根节点\n\n# 第一部分\n正文", course_id, "材料.docx")
+    root = next(node for node in nodes if node.level == 0)
+    detached = next(node for node in nodes if node.title == "第一部分")
+    detached.parent_id = None
+
+    ensure_tree_parentage(nodes)
+
+    assert detached.parent_id == root.id
 
 
 def test_formal_toc_hint_without_body_boundary_uses_topic_titles() -> None:

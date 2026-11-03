@@ -330,6 +330,139 @@ async def _repair_orphaned_dispatch_jobs() -> None:
             )
 
 
+async def _repair_detached_content_tree_nodes() -> None:
+    """Restore the invariant that descendants belong to one material root.
+
+    Older Word imports could retain level-2 headings after their empty
+    structural parent was filtered out. Those rows had no parent and appeared
+    as a second copy of the uploaded document. Repair only unambiguous groups:
+    one course, one source file and exactly one level-0 root.
+    """
+    from collections import defaultdict
+    import re
+    import uuid
+    from sqlalchemy import select
+
+    from database import async_session
+    from models.content import CourseContentTree
+    from models.ingestion import IngestionJob
+
+    async with async_session() as db:
+        nodes = list((await db.execute(
+            select(CourseContentTree).order_by(
+                CourseContentTree.course_id,
+                CourseContentTree.source_file,
+                CourseContentTree.created_at,
+                CourseContentTree.order_index,
+            )
+        )).scalars().all())
+        groups: dict[tuple[object, str], list[CourseContentTree]] = defaultdict(list)
+        for node in nodes:
+            source_file = (node.source_file or "").strip()
+            if source_file:
+                groups[(node.course_id, source_file)].append(node)
+
+        jobs = list((await db.execute(
+            select(IngestionJob).where(
+                IngestionJob.course_id.isnot(None),
+                IngestionJob.original_filename.isnot(None),
+                IngestionJob.extracted_markdown.isnot(None),
+            ).order_by(IngestionJob.created_at.desc())
+        )).scalars().all())
+        latest_markdown: dict[tuple[object, str], str] = {}
+        for job in jobs:
+            key = (job.course_id, (job.original_filename or "").strip())
+            if key[1] and key not in latest_markdown:
+                latest_markdown[key] = job.extracted_markdown or ""
+
+        repaired = 0
+        rebuilt_groups = 0
+        pending_group_links: list[tuple[CourseContentTree, CourseContentTree]] = []
+        chinese_major = {
+            1: "一", 2: "二", 3: "三", 4: "四", 5: "五",
+            6: "六", 7: "七", 8: "八", 9: "九", 10: "十",
+        }
+        for group_key, grouped_nodes in groups.items():
+            roots = [node for node in grouped_nodes if node.parent_id is None and node.level == 0]
+            if len(roots) != 1:
+                continue
+            root = roots[0]
+            for node in grouped_nodes:
+                if node.parent_id is None and node.level > 0:
+                    node.parent_id = root.id
+                    repaired += 1
+
+            # Recover structural H1 headings removed by the legacy parser.
+            # AI notes and progress rows keep referencing the original section
+            # IDs; only parent links and missing container nodes are restored.
+            markdown = latest_markdown.get(group_key, "")
+            current_h1: str | None = None
+            headings_by_major: dict[int, str] = {}
+            for raw_line in markdown.splitlines():
+                heading = re.match(r"^\s*(#{1,6})\s+(.+?)\s*$", raw_line)
+                if not heading:
+                    continue
+                level = len(heading.group(1))
+                title = heading.group(2).strip()
+                if level == 1:
+                    current_h1 = title
+                    continue
+                section = re.match(r"^(\d+)[.．]\d+(?![.．\d])", title)
+                if level == 2 and section and current_h1:
+                    headings_by_major.setdefault(int(section.group(1)), current_h1)
+
+            for major, source_title in sorted(headings_by_major.items()):
+                direct_sections = [
+                    node for node in grouped_nodes
+                    if node.parent_id == root.id
+                    and re.match(rf"^{major}[.．]\d+(?![.．\d])", (node.title or "").strip())
+                ]
+                if not direct_sections:
+                    continue
+                prefix = chinese_major.get(major)
+                display_title = source_title
+                if prefix and not re.match(rf"^(?:{prefix}|第\s*{prefix})[、.．章节\s]", source_title):
+                    display_title = f"{prefix}、{source_title}"
+                already_exists = any(
+                    node.parent_id == root.id and node.level == 1
+                    and (node.title or "").strip() == display_title
+                    for node in grouped_nodes
+                )
+                if already_exists:
+                    continue
+                container = CourseContentTree(
+                    id=uuid.uuid4(),
+                    course_id=root.course_id,
+                    parent_id=root.id,
+                    title=display_title,
+                    level=1,
+                    order_index=major,
+                    source_file=root.source_file,
+                    source_type=root.source_type,
+                    content_category=root.content_category,
+                    metadata_={"structureSource": "RECOVERED_FROM_SOURCE_HEADINGS"},
+                )
+                db.add(container)
+                grouped_nodes.append(container)
+                for section_node in direct_sections:
+                    pending_group_links.append((section_node, container))
+                rebuilt_groups += 1
+
+        if repaired or rebuilt_groups:
+            # SQLite checks the self-referential FK immediately. Persist new
+            # structural containers before pointing existing rows at them.
+            if rebuilt_groups:
+                await db.flush()
+                for section_node, container in pending_group_links:
+                    section_node.parent_id = container.id
+            await db.commit()
+            logger.info(
+                "Repaired content trees: %d detached node(s), %d recovered heading group(s)",
+                repaired,
+                rebuilt_groups,
+            )
+
+
 async def _cleanup_stale_provisional_workspaces() -> None:
     """Remove abandoned, unpublished creation attempts after retention expiry.
 
@@ -538,6 +671,7 @@ async def run_startup_hooks() -> None:
     await _finalize_legacy_embedding_jobs()
     await _repair_orphaned_retry_jobs()
     await _repair_orphaned_dispatch_jobs()
+    await _repair_detached_content_tree_nodes()
     await _cleanup_stale_provisional_workspaces()
     await _backfill_question_catalog()
     await _maybe_seed_system_data()

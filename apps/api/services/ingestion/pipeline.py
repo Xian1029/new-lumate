@@ -68,7 +68,7 @@ logger = logging.getLogger(__name__)
 # Bump when persisted course-tree semantics change. Including this version in
 # the dedup digest lets an already-uploaded document be rebuilt once with the
 # new chapter/section parser instead of returning its legacy noisy tree.
-_INGESTION_SCHEMA_VERSION = b"textbook-sections-v7-structured-report-sections\0"
+_INGESTION_SCHEMA_VERSION = b"document-outline-v9-general-material-profiles\0"
 _PDF_EXTRACTION_REPAIR_VERSION = b"pdf-bounded-page-retry-v1\0"
 
 _PHASE_LABELS = {
@@ -496,12 +496,18 @@ async def run_ingestion_pipeline(
         # normalized text into classification and tree construction. This is
         # especially important for Chinese PDF目录 where glyph spacing and
         # page headers otherwise hide the textbook signals.
-        from services.content_text import normalize_pdf_markdown
+        from services.content_text import clean_course_text, normalize_pdf_markdown
         from services.parser.english_textbook import DOCUMENT_MARKER, english_extraction_report
         # English page coordinates and boundaries are already normalized.
         # Math's digit-gap repair would join "UNIT 2\n3" into "UNIT 23".
-        if not extracted.startswith(DOCUMENT_MARKER):
+        extension = (filename or "").lower().rsplit(".", 1)[-1]
+        if not extracted.startswith(DOCUMENT_MARKER) and extension == "pdf":
             extracted = normalize_pdf_markdown(extracted) or ""
+        elif not extracted.startswith(DOCUMENT_MARKER):
+            # Office and text files already carry meaningful line and slide
+            # boundaries. PDF digit-gap repair may join a slide number with a
+            # chapter number on the next line ("Slide 3" + "01" -> "301").
+            extracted = clean_course_text(extracted) or ""
         job.extracted_markdown = extracted
 
         english_report = english_extraction_report(extracted)
@@ -548,6 +554,35 @@ async def run_ingestion_pipeline(
             extracted,
             filename,
         )
+        if extension in {"pdf", "doc", "docx", "ppt", "pptx", "txt", "md", "rtf", "odt"}:
+            from services.ingestion.document_structure import (
+                document_quality_notice,
+                is_k12_textbook_document,
+                structure_non_textbook_document,
+            )
+            is_k12_textbook = is_k12_textbook_document(filename, extracted)
+            structure_report = {"strategy": "k12_textbook"}
+            if not is_k12_textbook:
+                extracted, structure_report = structure_non_textbook_document(extracted, filename)
+                # Exam papers use explicit question-type boundaries. Asking a
+                # general semantic model to regroup individual questions can
+                # make the directory unstable and is unnecessary.
+                if structure_report.get("strategy") != "assessment":
+                    from services.ingestion.semantic_outline import enhance_outline_with_ai
+                    extracted, ai_outline_used = await enhance_outline_with_ai(extracted, filename)
+                    if ai_outline_used:
+                        structure_report = {**structure_report, "ai_enhanced": True}
+                # A report mentioning courses is not a textbook. Keep the
+                # broad business category for compatibility, but route its
+                # structure through the general material path.
+                if job.content_category == "textbook":
+                    job.content_category = "notes"
+                    job.classification_method = "document_profile"
+            job.page_stats = {**(job.page_stats or {}), "document_structure": structure_report}
+            quality_notice = document_quality_notice(extracted, filename, structure_report)
+            if quality_notice:
+                job.page_stats = {**(job.page_stats or {}), "quality_notice": quality_notice}
+            job.extracted_markdown = extracted
         job.workflow_state = "CLASSIFIED"
         await db.commit()
 

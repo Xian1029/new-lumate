@@ -16,10 +16,14 @@ logger = logging.getLogger(__name__)
 # ── Step 0: Filename regex patterns (expanded) ──
 
 FILENAME_PATTERNS = {
+    # Assessment intent must win before subject names. Previously any filename
+    # containing “数学/语文/英语” was classified as a textbook, so a mathematics
+    # exam paper was sent through the book TOC parser.
+    r"(?:试卷|测试|练习|习题|作业|考试|月考|期中|期末|模拟题|题库|测验|卷子|(?i:worksheet|exam|test|quiz|homework|assignment|problem.?set))": "assignment",
     # Chinese textbook filenames do not contain the English tokens below.
     # Match publisher/grade/edition markers before falling back to an LLM so
     # self-hosted deployments can classify教材 without an external provider.
-    r"(?:教材|教科书|课本|教辅|人教版|北师大版|苏教版|鲁教版|粤教版|科粤版|译林版|苏少版|五四制|七年级|八年级|九年级|上册|下册|全一册|教师用书|学生读本|数学|语文|英语|生物|化学|物理|地理|历史|道德与法治|音乐|美术|信息技术|综合实践|劳动技术|[六七八九]\s*[上下ABab]|[6789]\s*[上下]|[6789][ABab])": "textbook",
+    r"(?:教材|教科书|课本|教辅|人教版|北师大版|苏教版|鲁教版|粤教版|科粤版|译林版|苏少版|五四制|上册|下册|全一册|教师用书|学生读本|[六七八九]\s*[上下ABab]|[6789]\s*[上下]|[6789][ABab])": "textbook",
     r"(?i)lecture|slides|ppt|lec\d|class.?note|presentation": "lecture_slides",
     r"(?i)chapter|textbook|reading|book|reference|manual|guide": "textbook",
     r"(?i)hw|homework|assignment|problem.?set|ps\d|worksheet|exercise|lab\b|project\b": "assignment",

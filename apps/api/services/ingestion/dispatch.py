@@ -96,70 +96,30 @@ async def dispatch_content(
             await db.flush()
             logger.info("Dedup: removed %d existing nodes for source %s", len(old_ids), source_label)
 
-        # PPT files: split per slide for precise search
-        is_pptx = source_name.endswith((".pptx", ".ppt"))
-        if is_pptx:
-            import uuid as _uuid
-            full_content = job.extracted_markdown.strip()
-            slide_separator = "\n\n---\n\n"
-            slide_chunks = [s.strip() for s in full_content.split(slide_separator) if s.strip()]
-
-            root_summary = full_content[:500] + "..." if len(full_content) > 500 else full_content
-            root = CourseContentTree(
-                id=_uuid.uuid4(),
-                course_id=job.course_id,
-                parent_id=None,
-                title=job.original_filename or "Presentation",
-                level=0,
-                order_index=0,
-                content=root_summary,
-                source_file=source_label,
-                source_type=job.source_type,
-            )
-            nodes = [root]
-
-            for i, slide_content in enumerate(slide_chunks):
-                lines = slide_content.split("\n")
-                # The extractor adds a technical ``## Slide N`` marker for
-                # boundaries. It is not useful to a learner as a directory
-                # title, so prefer the first real line of slide content.
-                visible_lines = [
-                    line.lstrip("#").strip(" -•\t")
-                    for line in lines
-                    if line.strip() and not re.match(r"^\s*#{0,6}\s*slide\s+\d+\s*$", line, re.IGNORECASE)
-                ]
-                title = visible_lines[0] if visible_lines else f"第 {i + 1} 页"
-                if len(title) > 80:
-                    title = title[:77].rstrip("，,、；;：: ") + "…"
-                child = CourseContentTree(
-                    id=_uuid.uuid4(),
-                    course_id=job.course_id,
-                    parent_id=root.id,
-                    title=title,
-                    level=1,
-                    order_index=i,
-                    content=slide_content,
-                    source_file=source_label,
-                    source_type=job.source_type,
-                )
-                nodes.append(child)
-            logger.info("PPT split into %d slide nodes for %s", len(slide_chunks), source_label)
-        else:
-            nodes = parsed_nodes
-            if nodes is None:
-                from services.parser.english_textbook import DOCUMENT_MARKER
-                source_markdown = job.extracted_markdown
-                if not source_markdown.startswith(DOCUMENT_MARKER):
+        # Word, PowerPoint and TXT now share the same Markdown-tree path.
+        # The format extractor supplies trustworthy source order/headings and
+        # this parser establishes hierarchy consistently for every new space.
+        nodes = parsed_nodes
+        if nodes is None:
+            from services.parser.english_textbook import DOCUMENT_MARKER
+            source_markdown = job.extracted_markdown
+            if not source_markdown.startswith(DOCUMENT_MARKER):
+                if source_name.endswith(".pdf"):
                     source_markdown = normalize_pdf_markdown(source_markdown) or ""
-                # Defensive second boundary: older extractors and imported
-                # jobs cannot bypass the Markdown-safe text contract. Parsing
-                # is CPU work; keep it off the async API event loop.
-                nodes = await asyncio.to_thread(
-                    _markdown_to_tree,
-                    markdown=source_markdown,
-                    course_id=job.course_id,
-                    source_file=source_label,
-                )
+                else:
+                    from services.content_text import clean_course_text
+                    source_markdown = clean_course_text(source_markdown) or ""
+            # Defensive second boundary: older extractors and imported jobs
+            # cannot bypass the Markdown-safe text contract. Parsing is CPU
+            # work; keep it off the async API event loop.
+            nodes = await asyncio.to_thread(
+                _markdown_to_tree,
+                markdown=source_markdown,
+                course_id=job.course_id,
+                source_file=source_label,
+            )
+        from services.parser.pdf import ensure_tree_parentage
+        nodes = ensure_tree_parentage(nodes)
         outline_report = (job.page_stats or {}).get("outline_integrity", {})
         structure_source = "SOURCE_TOC" if outline_report.get("checked") else "GENERATED_FROM_CONTENT"
         # SQLite otherwise checks self-referential FKs at each statement,

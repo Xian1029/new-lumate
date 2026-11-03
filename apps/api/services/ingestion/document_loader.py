@@ -40,6 +40,8 @@ from services.ingestion.document_loader_formats import (  # noqa: F401
     _extract_html_fallback,
     _extract_with_loader_dict,
     _extract_office_fallback,
+    _extract_docx_fallback,
+    _extract_pptx_fallback,
     _extract_plain_text,
     _get_marker_models,
 )
@@ -94,7 +96,15 @@ async def extract_content(
     if ext in ("html", "htm"):
         return await _extract_local_with_crawl4ai(file_path)
 
-    # Office formats -> GPT-Researcher loader_dict
+    # Word/PPT structure must retain its original order and native heading or
+    # title placeholders. The generic Unstructured loaders flatten both and
+    # turn every PowerPoint text box into an unrelated paragraph.
+    if ext == "docx":
+        return await asyncio.to_thread(_extract_docx_fallback, file_path)
+    if ext == "pptx":
+        return await asyncio.to_thread(_extract_pptx_fallback, file_path)
+
+    # Other Office formats -> GPT-Researcher loader_dict
     if ext in OFFICE_EXTENSIONS:
         return await asyncio.to_thread(_extract_with_loader_dict, file_path, ext)
 

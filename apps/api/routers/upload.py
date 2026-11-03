@@ -697,3 +697,35 @@ async def get_uploaded_file(
         filename=job.original_filename,
         content_disposition_type="inline",
     )
+
+
+@router.get("/files/{job_id}/text", summary="Read extracted document text", description="Return the parsed text of an uploaded Office or text document for AI close reading.")
+async def get_uploaded_file_text(
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return server-extracted text without exposing another user's document."""
+    result = await db.execute(
+        select(IngestionJob).where(
+            IngestionJob.id == job_id,
+            IngestionJob.user_id == user.id,
+            IngestionJob.status == "completed",
+        )
+    )
+    job = result.scalar_one_or_none()
+    if not job:
+        raise NotFoundError("File")
+
+    extension = Path(job.original_filename or "").suffix.lower()
+    if extension not in {".doc", ".docx", ".ppt", ".pptx", ".txt", ".md", ".rtf", ".odt"}:
+        raise ValidationError("该文件应使用原始版式阅读器打开")
+    content = (job.extracted_markdown or "").strip()
+    if not content:
+        raise NotFoundError("Extracted document text")
+    return {
+        "job_id": str(job.id),
+        "filename": job.original_filename,
+        "format": extension.removeprefix("."),
+        "content": content,
+    }

@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PdfAnswer } from "@/components/ai-pdf-reader/pdf-answer";
+import { MarkdownRenderer } from "@/components/shared/markdown-renderer";
 import { useCourseStore } from "@/store/course";
 import { useWorkspaceStore } from "@/store/workspace";
 import { useT } from "@/lib/i18n-context";
@@ -292,6 +293,154 @@ function PdfStudyReader({ url, courseId, jobId, initialPage = 1 }: { url: string
   </div>;
 }
 
+/** Read parsed Word, PowerPoint and text files without pretending they are PDFs. */
+function DocumentStudyReader({ courseId, jobId }: { courseId: string; jobId: string }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const cachedAnswersRef = useRef(new Map<string, string>());
+  const [content, setContent] = useState("");
+  const [selected, setSelected] = useState("");
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [sourceLabel, setSourceLabel] = useState("");
+  const [status, setStatus] = useState("正在加载解析后的原文…");
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`${API_BASE}/content/files/${jobId}/text`, buildSecureRequestInit({ signal: controller.signal }))
+      .then(async (response) => {
+        if (!response.ok) throw new Error("document");
+        return response.json() as Promise<{ content?: string; filename?: string }>;
+      })
+      .then((payload) => {
+        const parsed = payload.content?.trim() ?? "";
+        if (!parsed) throw new Error("empty");
+        setContent(parsed);
+        setStatus("原文已按解析结构显示。拖选文字即可精读。");
+      })
+      .catch((error: unknown) => {
+        if ((error as { name?: string })?.name !== "AbortError") {
+          setStatus("文档原文暂时无法显示，请返回后重试或重新上传文件。");
+        }
+      });
+    return () => {
+      controller.abort();
+      abortRef.current?.abort("close");
+    };
+  }, [jobId]);
+
+  const captureSelection = () => {
+    const selection = window.getSelection();
+    const container = contentRef.current;
+    if (!selection || selection.isCollapsed || !container || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    if (!container.contains(range.commonAncestorContainer)) return;
+    const text = cleanPdfSelection(selection.toString());
+    if (!text) return;
+    setSelected(text);
+    setQuestion("");
+    setAnswer("");
+    setSourceLabel("");
+  };
+
+  const explain = async () => {
+    const text = selected.trim();
+    if (!text || abortRef.current) return;
+    const learnerQuestion = question.trim() || "请详细解释这段资料内容。";
+    const cacheKey = JSON.stringify([jobId, text, learnerQuestion]);
+    const cached = cachedAnswersRef.current.get(cacheKey);
+    if (cached) {
+      setAnswer(cached);
+      toast.info("这段文字已解释，已显示上次结果。");
+      return;
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setIsGenerating(true);
+    setAnswer("正在生成解释，请稍候…");
+    const timeout = window.setTimeout(() => controller.abort("timeout"), 55_000);
+    try {
+      const response = await fetch(`${API_BASE}/pdf-reader/explanations/stream`, buildSecureRequestInit({
+        method: "POST",
+        body: JSON.stringify({ course_id: courseId, job_id: jobId, anchor: { page: 1, text }, question: learnerQuestion }),
+        signal: controller.signal,
+      }));
+      if (!response.ok || !response.body) {
+        setAnswer(response.status === 429 ? "提问太频繁了，请稍等片刻再试。" : "解释暂时无法生成，请稍后重试。");
+        return;
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullAnswer = "";
+      let receivedError = false;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const parsed = takePdfStreamEvents(buffer + decoder.decode(value, { stream: true }));
+        buffer = parsed.remainder;
+        for (const event of parsed.events) {
+          if (event.event === "content") {
+            const chunk = JSON.parse(event.data) as { content?: string };
+            if (chunk.content) {
+              fullAnswer += chunk.content;
+              setAnswer(fullAnswer);
+            }
+          } else if (event.event === "sources") {
+            const sources = JSON.parse(event.data) as Array<{ label?: string }>;
+            setSourceLabel(sources[0]?.label ?? "文档原文");
+          } else if (event.event === "no_evidence") {
+            const payload = JSON.parse(event.data) as { message?: string };
+            receivedError = true;
+            setAnswer(payload.message ?? "当前资料暂时无法提取正文。");
+          } else if (event.event === "error") {
+            receivedError = true;
+            setAnswer("解释暂时中断了，请点击“重试解释”再试一次。");
+          }
+        }
+      }
+      if (fullAnswer && !receivedError) cachedAnswersRef.current.set(cacheKey, fullAnswer);
+      if (!fullAnswer && !receivedError) setAnswer("暂时没有生成解释，请重新选择文段后再试。");
+    } catch {
+      if (controller.signal.reason === "timeout") setAnswer("解释等待时间较长，请点击“重试解释”再试一次。");
+      else if (!controller.signal.aborted) setAnswer("网络似乎不稳定，请稍后重试。");
+    } finally {
+      window.clearTimeout(timeout);
+      if (abortRef.current === controller) abortRef.current = null;
+      setIsGenerating(false);
+    }
+  };
+
+  const clearReading = () => {
+    abortRef.current?.abort("clear");
+    abortRef.current = null;
+    window.getSelection()?.removeAllRanges();
+    setSelected("");
+    setQuestion("");
+    setAnswer("");
+    setSourceLabel("");
+    setIsGenerating(false);
+  };
+
+  return <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-2 gap-3 p-3 md:grid-cols-[minmax(0,1fr)_24rem] md:grid-rows-1">
+    <div className="overflow-auto rounded-xl border bg-white p-5 shadow-sm dark:bg-card sm:p-8">
+      <p className="sticky top-0 z-10 mb-5 rounded-lg border bg-background/95 px-3 py-2 text-xs text-muted-foreground shadow-sm backdrop-blur">{status}</p>
+      {content ? <div ref={contentRef} onMouseUp={captureSelection} className="cursor-text select-text"><MarkdownRenderer content={content} className="mx-auto max-w-4xl text-[15px] leading-7" /></div> : null}
+    </div>
+    <aside className="overflow-auto rounded-2xl border bg-card p-4 shadow-sm">
+      <div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-brand-muted text-brand"><Sparkles className="size-5" /></span><div><h2 className="text-lg font-bold">AI 精读</h2><p className="text-xs text-muted-foreground">回答仅依据当前文档选段</p></div></div>
+      <label htmlFor="document-selected-text" className="mt-4 block text-xs font-semibold">精选知识（可编辑）</label>
+      <textarea id="document-selected-text" value={selected} maxLength={2400} disabled={isGenerating} onChange={(event) => { setSelected(event.target.value); setAnswer(""); setSourceLabel(""); }} placeholder="拖选左侧原文后，可在这里修改文字" className="mt-2 min-h-28 w-full resize-y rounded-xl border border-border bg-muted/40 p-3 text-[15px] leading-7 outline-none transition focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/20 disabled:opacity-70" />
+      <p className="mt-1 text-right text-xs text-muted-foreground">{selected.length} / 2400 字</p>
+      <label htmlFor="document-reader-question" className="mt-3 block text-xs font-semibold">想重点了解什么（选填）</label>
+      <textarea id="document-reader-question" value={question} maxLength={800} disabled={isGenerating} onChange={(event) => setQuestion(event.target.value)} placeholder="例如：这一段的核心步骤是什么？" className="mt-2 min-h-20 w-full resize-y rounded-xl border border-border bg-background p-3 text-[15px] leading-7 outline-none focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/20 disabled:opacity-70" />
+      <div className="mt-3 flex items-center gap-2"><Button size="sm" disabled={!selected.trim() || isGenerating} onClick={() => void explain()}>{isGenerating ? "正在精读…" : answer ? "继续追问" : "详细解读"}</Button><Button size="sm" variant="ghost" disabled={!selected && !answer && !question && !isGenerating} onClick={clearReading}>清除</Button></div>
+      <div className="mt-4 min-w-0" aria-live="polite">{answer && <PdfAnswer answer={answer} sourceLabel={sourceLabel} />}</div>
+    </aside>
+  </div>;
+}
+
 interface NotesSectionProps {
   courseId: string;
   blockId?: string;
@@ -450,7 +599,7 @@ export function NotesSection({
   const [aiNoteResolvedNodeId, setAiNoteResolvedNodeId] = useState<string | null>(null);
   const [sourceFiles, setSourceFiles] = useState<UploadedCourseFile[]>([]);
   const [sourceFilesLoading, setSourceFilesLoading] = useState(true);
-  const [sourcePreview, setSourcePreview] = useState<{ url: string; name: string; page?: number } | null>(null);
+  const [sourcePreview, setSourcePreview] = useState<{ url: string; jobId: string; name: string; kind: "pdf" | "document"; page?: number } | null>(null);
   const closeReader = useCallback(() => {
     setSourcePreview(null);
     onCloseReader?.();
@@ -554,7 +703,9 @@ export function NotesSection({
           if (initialFile) {
             setSourcePreview({
               url: `${API_BASE}/content/files/${initialFile.job_id}`,
+              jobId: initialFile.job_id,
               name: initialFile.filename || initialFile.file_name || t("notes.originalPdf"),
+              kind: (initialFile.filename || initialFile.file_name || "").toLowerCase().endsWith(".pdf") ? "pdf" : "document",
               page: initialPage ?? 1,
             });
           }
@@ -837,9 +988,11 @@ export function NotesSection({
                         && selectedLearnableNode.source_file === (file.filename || file.file_name);
                       const page = isSelectedPdf ? selectedLearnableNode.metadata?.source_pages?.[0] : undefined;
                       setSourcePreview({
-                      url: `${API_BASE}/content/files/${file.job_id}${page ? `#page=${page}` : ""}`,
-                      name: file.filename || file.file_name || t("notes.originalPdf"),
-                      page: page ?? 1,
+                        url: `${API_BASE}/content/files/${file.job_id}${page ? `#page=${page}` : ""}`,
+                        jobId: file.job_id,
+                        name: file.filename || file.file_name || t("notes.originalPdf"),
+                        kind: (file.filename || file.file_name || "").toLowerCase().endsWith(".pdf") ? "pdf" : "document",
+                        page: page ?? 1,
                       });
                     }}
                     className="group flex w-full items-center gap-4 rounded-2xl border border-white/90 bg-white/85 px-4 py-4 text-left shadow-sm ring-1 ring-amber-100 transition duration-200 hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:border-border dark:bg-card/90 dark:ring-amber-900"
@@ -887,12 +1040,12 @@ export function NotesSection({
             <X className="size-5" />
           </button>
         </div>
-        <PdfStudyReader
+        {sourcePreview.kind === "pdf" ? <PdfStudyReader
           url={sourcePreview.url}
           courseId={courseId}
-          jobId={sourcePreview.url.split("/").pop()?.split("#")[0] ?? ""}
+          jobId={sourcePreview.jobId}
           initialPage={sourcePreview.page ?? 1}
-        />
+        /> : <DocumentStudyReader courseId={courseId} jobId={sourcePreview.jobId} />}
       </div>,
       document.body,
     ) : null}

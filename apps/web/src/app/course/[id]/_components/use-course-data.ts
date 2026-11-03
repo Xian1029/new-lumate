@@ -16,6 +16,7 @@ export function useCourseData(courseId: string) {
   const activeCourse = useCourseStore((s) => s.activeCourse);
   const courses = useCourseStore((s) => s.courses);
   const contentTree = useCourseStore((s) => s.contentTree);
+  const contentTreeCourseId = useCourseStore((s) => s.contentTreeCourseId);
   const fetchCourses = useCourseStore((s) => s.fetchCourses);
   const setActiveCourse = useCourseStore((s) => s.setActiveCourse);
   const fetchContentTree = useCourseStore((s) => s.fetchContentTree);
@@ -56,5 +57,11 @@ export function useCourseData(courseId: string) {
     health?.llm_status !== "mock_fallback" &&
     health?.llm_status !== "configuration_required";
 
-  return { health, course, courses, contentTree, aiActionsEnabled };
+  return {
+    health,
+    course,
+    courses,
+    contentTree: contentTreeCourseId === courseId ? contentTree : [],
+    aiActionsEnabled,
+  };
 }

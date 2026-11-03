@@ -138,13 +138,19 @@ def public_ingestion_message(internal_message: str | None) -> str:
     record for debugging, but must never be returned verbatim by an API.
     """
     message = (internal_message or "").lower()
+    if "password" in message or "encrypted" in message or "加密" in message or "密码" in message:
+        return "这份学习资料受密码保护，暂时无法读取。请先取消文件密码，再重新上传。"
+    if "corrupt" in message or "damaged" in message or "bad zip" in message or "损坏" in message:
+        return "这份学习资料可能已损坏或不完整。请先确认文件能正常打开，再重新导出并上传。"
+    if "unsupported" in message or "not supported" in message or "不支持" in message:
+        return "暂不支持这份文件的内部格式。建议另存为 PDF、DOCX、PPTX 或 TXT 后重新上传。"
     if "unreadable_pages" in message or "pdf pages could not be read" in message:
-        return "教材中有页面无法读取，请重新上传原文件，或换一份清晰完整的文件。"
+        return "学习资料中有页面无法读取，请重新上传原文件，或换一份清晰完整的文件。"
     if "outline coverage is incomplete" in message or "missing sections" in message:
         return "教材目录解析不完整，请重新上传原文件，或换一份完整版本。"
     if "no content could be extracted" in message:
         return "没有从文件中读取到可学习的内容，请检查文件是否完整或是否为扫描图片。"
-    return "教材暂时未能解析，请重新上传，或换一份 PDF、Word、PPT 文件。"
+    return "学习资料暂时未能解析。请确认文件能正常打开，或另存为 PDF、DOCX、PPTX、TXT 后重新上传。"
 
 
 class ToolExecutionError(AppError):

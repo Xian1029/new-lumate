@@ -9,7 +9,9 @@ from models.content import CourseContentTree
 
 
 _NON_LEARNING_CATEGORIES = {"reference", "syllabus", "assignment", "exam_schedule", "other"}
-_NON_LEARNING_TITLE = re.compile(r"前言|目录|版权|出版社|编者|主编|出版说明|封面")
+_NON_LEARNING_TITLE = re.compile(
+    r"前言|目录|版权|出版社|编者|主编|出版说明|封面|附录|参考文献|官方来源|致谢"
+)
 _STRUCTURE_PREFIX = re.compile(r"^(?:第[^章节]{0,8}[章节]|\d+(?:[.．·]\d+)*|[一二三四五六七八九十]+[、.．])")
 
 

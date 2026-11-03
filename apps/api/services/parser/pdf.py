@@ -300,7 +300,12 @@ def _markdown_to_tree(
     from services.parser.english_textbook import DOCUMENT_MARKER, english_markdown_to_tree
     if markdown.startswith(DOCUMENT_MARKER):
         return english_markdown_to_tree(markdown, course_id, source_file)
-    markdown = normalize_pdf_markdown(markdown) or ""
+    # PDF extraction needs glyph/digit repairs; Office and TXT sources must
+    # preserve their native newlines and slide/paragraph boundaries.
+    if source_file.lower().endswith(".pdf"):
+        markdown = normalize_pdf_markdown(markdown) or ""
+    else:
+        markdown = clean_course_text(markdown) or ""
     if not markdown:
         return []
 
@@ -960,7 +965,11 @@ def _restructure_textbook_nodes(
             None,
         )
     if body_start is None:
-        return [node for node in nodes if node.level == 0 or is_body_content(node.title, node.content)]
+        # This is a structured document, but not a textbook with numbered
+        # chapter markers. Word reports commonly use 一、 plus 2.1 headings.
+        # Filtering empty structural headings here removed their parent nodes
+        # while retaining descendants, leaving root-level orphans.
+        return nodes
 
     root = CourseContentTree(
         id=uuid.uuid4(), course_id=course_id, parent_id=None, title=source_file,
@@ -1273,6 +1282,43 @@ def _thin_tree(nodes: list[CourseContentTree]) -> list[CourseContentTree]:
     # Remove merged nodes
     result = [n for i, n in enumerate(nodes) if i not in indices_to_remove]
     return result
+
+
+def ensure_tree_parentage(nodes: list[CourseContentTree]) -> list[CourseContentTree]:
+    """Repair detached descendants before a parsed tree is persisted.
+
+    Parsers must never store a level-1+ node without a valid parent. Keeping
+    this invariant at the persistence boundary prevents one source document
+    from being rendered as several material roots even if a future extractor
+    produces an incomplete hierarchy.
+    """
+    if not nodes:
+        return nodes
+
+    node_ids = {node.id for node in nodes}
+    last_at_level: dict[int, CourseContentTree] = {}
+    current_root: CourseContentTree | None = None
+
+    for node in nodes:
+        level = max(int(node.level or 0), 0)
+        if level == 0:
+            current_root = node
+            last_at_level = {0: node}
+            continue
+
+        if node.parent_id not in node_ids:
+            parent = next(
+                (last_at_level[candidate] for candidate in range(level - 1, -1, -1) if candidate in last_at_level),
+                current_root,
+            )
+            if parent is not None:
+                node.parent_id = parent.id
+
+        last_at_level[level] = node
+        for deeper in [candidate for candidate in last_at_level if candidate > level]:
+            del last_at_level[deeper]
+
+    return nodes
 
 
 async def parse_pdf_to_tree(

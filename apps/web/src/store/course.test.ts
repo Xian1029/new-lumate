@@ -138,6 +138,21 @@ describe("useCourseStore", () => {
 
       expect(useCourseStore.getState().error).toBe("Failed");
     });
+
+    it("does not let an older course request overwrite the current tree", async () => {
+      let resolveFirst!: (value: unknown) => void;
+      mockGetContentTree
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }) as never)
+        .mockResolvedValueOnce([{ id: "new", title: "New", children: [] }] as never);
+
+      const first = useCourseStore.getState().fetchContentTree("old-course");
+      await useCourseStore.getState().fetchContentTree("new-course");
+      resolveFirst([{ id: "old", title: "Old", children: [] }]);
+      await first;
+
+      expect(useCourseStore.getState().contentTreeCourseId).toBe("new-course");
+      expect(useCourseStore.getState().contentTree).toEqual([{ id: "new", title: "New", children: [] }]);
+    });
   });
 
   describe("fetchIngestionJobs", () => {

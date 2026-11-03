@@ -27,6 +27,10 @@ class AdminAccountStatus(BaseModel):
     is_active: bool
 
 
+class AdminPasswordReset(BaseModel):
+    password: str
+
+
 @router.get("/admin/users")
 async def list_users(_: User = Depends(require_super_admin), db: AsyncSession = Depends(get_db)):
     users = (await db.execute(select(User).where(User.role == "student").order_by(User.created_at.desc()))).scalars().all()
@@ -61,6 +65,18 @@ async def change_user_status(user_id: uuid.UUID, body: AdminAccountStatus, _: Us
         await db.execute(UserSession.__table__.delete().where(UserSession.user_id == user.id))
     await db.commit()
     return {**_user_response(user).model_dump(), "is_active": user.is_active}
+
+
+@router.post("/admin/users/{user_id}/reset-password")
+async def reset_user_password(user_id: uuid.UUID, body: AdminPasswordReset, _: User = Depends(require_super_admin), db: AsyncSession = Depends(get_db)):
+    if len(body.password) < 8:
+        raise HTTPException(status_code=422, detail="新密码至少需要 8 位")
+    user = await _managed_student(db, user_id)
+    user.hashed_password = hash_password(body.password)
+    from models.user import UserSession
+    await db.execute(UserSession.__table__.delete().where(UserSession.user_id == user.id))
+    await db.commit()
+    return {"message": "密码已重置，原登录已失效"}
 
 
 @router.delete("/admin/users/{user_id}", status_code=204)

@@ -22,6 +22,18 @@ export interface IngestionPageStats {
     duplicate_sections?: string[];
     order_mismatch?: boolean;
   };
+  document_structure?: {
+    strategy: "empty" | "source_headings" | "assessment" | "report" | "k12_textbook";
+    headings?: number;
+    removed_layout_lines?: number;
+    ai_enhanced?: boolean;
+  };
+  quality_notice?: {
+    code: "EMBEDDED_MEDIA_NOT_TEXT" | "LOW_TEXT_CONTENT" | "SEMANTIC_STRUCTURE_USED";
+    title: string;
+    message: string;
+    action: "replace_optional" | "review_outline";
+  };
 }
 
 export interface IngestionJobSummary {

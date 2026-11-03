@@ -12,6 +12,7 @@ Academic foundations:
 import json
 import logging
 import math
+import re
 import uuid
 
 from sqlalchemy import select, func
@@ -38,12 +39,41 @@ FUSION_SIMILARITY_THRESHOLD = 0.85  # Graphusion: merge concepts above this cosi
 MAX_EXTRACTION_CHUNKS = 24
 DEFAULT_MAX_CONCEPT_NODES = 48
 
+_STRUCTURAL_CONCEPT_NAME = re.compile(
+    r"^(?:"
+    r"(?:第?[一二三四五六七八九十百\d]+[、.．)）\s]*)?"
+    r"(?:选择题|填空题|判断题|计算题|解答题|证明题|作图题|应用题|综合题|探究题|"
+    r"阅读理解题|完形填空|写作题|作文|听力(?:部分|题)?|附加题)"
+    r"(?:部分|题目|题型|答题技巧)?"
+    r"|试卷题目|课程核心问题|总体概览|目录|前言|封面|参考文献|官方来源(?:汇总)?"
+    r"|XML架构声明|文档属性|文档元信息|修订兼容性设置|排版控制选项|"
+    r"文档保护设置|网格布局设置|数学公式支持|"
+    r"(?:信息|关键字|其他|内置|扩展|变量|常量|函数|字符串|数据类型|运算符|注释|"
+    r"注解|注释变量|导入|区域|属性|控制流|预处理器|十进制数|基数数字|浮点数|"
+    r"特殊字符串|特殊字符|逐字字符串|文档注释)标记"
+    r"|第\s*\d+\s*页|page\s*\d+"
+    r")$",
+    re.IGNORECASE,
+)
+
 _EXTRACT_PROMPT = """Analyze this educational content and extract the key concepts being taught.
 
 Language requirement (mandatory): Detect the language used by the content and write every
 concept name, description, prerequisite, and related concept in that same language. If the
 content is Chinese, all concept names and descriptions must be natural Simplified Chinese;
 do not output English concept names or bilingual labels.
+
+Document-profile rules (mandatory):
+- Textbook/lesson: extract the actual subject concepts and skills taught by the section.
+- Exam/worksheet/question bank: infer the tested knowledge and reasoning skills from question
+  stems and answer explanations. Never use format labels such as multiple choice, fill-in,
+  true/false, calculation, proof, or question numbers as concepts.
+- Slides/handout/TXT: extract substantive ideas across the slide or semantic section, not slide
+  numbers, agenda labels, speaker notes, or layout captions.
+- Report/research/general PDF: extract themes, methods, findings, and substantive mechanisms;
+  ignore page headers, table headers, source lists, boilerplate, and repeated section captions.
+- A filename, chapter container, document type, question type, or navigation label is not itself
+  a knowledge concept. Do not invent prerequisites that are not supported by the content.
 
 For each concept, provide:
 1. name: A concise concept name (2-5 words, e.g. "Chain Rule", "Supply and Demand")
@@ -68,6 +98,17 @@ Content title: {title}
 
 Content (first 3000 chars):
 {content}"""
+
+
+def _is_meaningful_concept_name(name: str) -> bool:
+    """Reject layout labels so the graph contains knowledge, not navigation."""
+    compact = re.sub(r"\s+", " ", str(name or "")).strip(" ：:、,.，。")
+    if len(compact) < 2 or len(compact) > 80:
+        return False
+    if _STRUCTURAL_CONCEPT_NAME.fullmatch(compact):
+        return False
+    from services.content_text import has_unreadable_text
+    return not has_unreadable_text(compact)
 
 
 # ── Per-Chunk Extraction ──
@@ -323,6 +364,17 @@ async def extract_course_concepts(
         logger.error("Concept extraction returned 0 concepts for course %s", course_id)
         return []
 
+    # Filter structural/layout labels before embedding fusion. Besides keeping
+    # the learner graph meaningful, this avoids paying embedding cost for
+    # entries such as “选择题” or “官方来源汇总”.
+    all_concepts = [
+        item for item in all_concepts
+        if _is_meaningful_concept_name(str(item.get("name") or ""))
+    ]
+    if not all_concepts:
+        logger.warning("Only structural labels were extracted for course %s", course_id)
+        return []
+
     # Phase 2: Graphusion fusion — deduplicate similar concepts across chunks
     concepts_data = await _fuse_concepts(all_concepts)
 
@@ -332,7 +384,7 @@ async def extract_course_concepts(
 
     for item in concepts_data[:max_nodes]:
         name = (item.get("name") or "").strip()
-        if not name or len(name) > 200:
+        if not _is_meaningful_concept_name(name):
             continue
 
         # Skip if we already have a node with this name (case-insensitive dedup)

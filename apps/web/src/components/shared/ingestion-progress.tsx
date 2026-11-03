@@ -96,6 +96,11 @@ export function IngestionProgress({ courseId, onIngestionComplete }: IngestionPr
       && (j.page_stats.failed_pages?.length ?? 0) > 0
       && !dismissedPartialJobIds.has(j.id),
   );
+  const qualityWarningJobs = visibleJobs.filter(
+    (j) => j.status === "completed"
+      && Boolean(j.page_stats?.quality_notice)
+      && !dismissedPartialJobIds.has(`quality:${j.id}`),
+  );
 
   // Compute aggregate progress for active jobs
   const avgProgress =
@@ -130,13 +135,13 @@ export function IngestionProgress({ courseId, onIngestionComplete }: IngestionPr
       await fetchIngestionJobs(courseId);
       await fetchContentTree(courseId);
       onIngestionComplete?.();
-      toast.success(uploaded > 1 ? `已添加 ${uploaded} 份教材` : "教材已重新添加", {
+      toast.success(uploaded > 1 ? `已添加 ${uploaded} 份学习资料` : "学习资料已重新添加", {
         description: replacementTarget
           ? "新资料已处理成功，原失败记录已自动清理。"
-          : "正在重新整理教材内容。",
+          : "正在重新整理资料内容。",
       });
     } catch {
-      toast.error("这份教材还是没有解析成功", {
+      toast.error("这份学习资料还是没有解析成功", {
         description: "可以检查文件是否能正常打开，或换一份 PDF、Word、PPT 文件。",
       });
       await fetchIngestionJobs(courseId);
@@ -199,7 +204,7 @@ export function IngestionProgress({ courseId, onIngestionComplete }: IngestionPr
     .slice(0, 3);
   const showCanvasAlert = canvasSessionErrors.length > 0 && !canvasAlertDismissed;
 
-  if (activeJobs.length === 0 && recentFailedJobs.length === 0 && !showCanvasAlert && partialJobs.length === 0) {
+  if (activeJobs.length === 0 && recentFailedJobs.length === 0 && !showCanvasAlert && partialJobs.length === 0 && qualityWarningJobs.length === 0) {
     return null;
   }
 
@@ -293,6 +298,30 @@ export function IngestionProgress({ courseId, onIngestionComplete }: IngestionPr
         </div>
       )}
 
+      {qualityWarningJobs.map((job) => {
+        const notice = job.page_stats?.quality_notice;
+        if (!notice) return null;
+        return (
+          <div key={`quality-${job.id}`} role="alert" className="rounded-2xl border border-amber-300/60 bg-amber-50/80 px-4 py-3 text-amber-950 card-shadow">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold">{notice.title}</p>
+                <p className="mt-0.5 text-xs leading-5 text-amber-900/85">{job.filename}：{notice.message}</p>
+                {notice.action === "replace_optional" && (
+                  <button type="button" disabled={uploading} onClick={() => openReplacementUpload()} className="mt-2 inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100">
+                    <Upload className="size-3" />上传更清晰的版本
+                  </button>
+                )}
+              </div>
+              <button type="button" onClick={() => dismissPartialJob(`quality:${job.id}`)} className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-amber-700 hover:bg-amber-100" aria-label={`关闭 ${job.filename} 的资料质量提示`}>
+                <X className="size-4" />
+              </button>
+            </div>
+          </div>
+        );
+      })}
+
       {/* Active / failed ingestion jobs */}
       {(activeJobs.length > 0 || recentFailedJobs.length > 0) && (
         <div className="rounded-2xl border border-blue-200/60 bg-blue-50/70 px-3 py-2.5 text-sm card-shadow">
@@ -336,7 +365,7 @@ export function IngestionProgress({ courseId, onIngestionComplete }: IngestionPr
                     <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
                     <div className="min-w-0">
                       <p className="truncate font-medium">{job.filename}</p>
-                      <p className="mt-0.5 text-xs text-red-700/80">这份教材暂时未能解析，请重新上传或换一份文件。</p>
+                      <p className="mt-0.5 text-xs text-red-700/80">{job.error_message || "这份学习资料暂时未能解析。请确认文件能正常打开，或换一种格式后重试。"}</p>
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
@@ -371,7 +400,7 @@ export function IngestionProgress({ courseId, onIngestionComplete }: IngestionPr
         multiple={!replacementTarget}
         accept={ACCEPTED_FILE_TYPES}
         className="hidden"
-        aria-label="重新选择要上传的教材"
+        aria-label="重新选择要上传的学习资料"
         onChange={(event) => void handleReplacementUpload(event)}
       />
     </div>

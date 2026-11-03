@@ -18,7 +18,7 @@ from services.auth.dependency import get_current_user
 from services.course_access import get_course_or_404
 from services.llm.readiness import ensure_llm_ready
 from services.llm.router import get_llm_client
-from services.pdf_reader import page_evidence, prompts
+from services.pdf_reader import document_evidence, page_evidence, prompts
 from services.upload_storage import resolve_upload_path
 
 router = APIRouter()
@@ -40,13 +40,20 @@ async def stream_explanation(
     if not job or not job.file_path:
         raise NotFoundError("File")
     file_path = resolve_upload_path(job.file_path, settings.upload_dir)
-    if not file_path or file_path.suffix.lower() != ".pdf":
-        raise NotFoundError("PDF file")
+    if not file_path:
+        raise NotFoundError("File")
 
     try:
-        source = await asyncio.to_thread(
-            page_evidence, file_path, body.anchor.page, body.anchor.text,
-        )
+        if file_path.suffix.lower() == ".pdf":
+            source = await asyncio.to_thread(
+                page_evidence, file_path, body.anchor.page, body.anchor.text,
+            )
+        elif file_path.suffix.lower() in {".doc", ".docx", ".ppt", ".pptx", ".txt", ".md", ".rtf", ".odt"}:
+            source = document_evidence(job.extracted_markdown or "", body.anchor.text)
+            if source:
+                source["label"] = job.original_filename or "文档原文"
+        else:
+            source = None
     except Exception:
         source = None
 
@@ -54,14 +61,14 @@ async def stream_explanation(
         yield {
             "event": "no_evidence",
             "data": json.dumps({
-                "message": "这一页暂时无法提取课本正文，请换一页或检查是否为扫描件。",
+                "message": "当前资料暂时无法提取正文，请重新上传或检查文件内容。",
             }, ensure_ascii=False),
         }
 
     if not source:
         return EventSourceResponse(no_text())
 
-    await ensure_llm_ready("PDF 精读")
+    await ensure_llm_ready("AI 精读")
     system, prompt = prompts(body.anchor.text, body.question, source)
 
     async def events():
@@ -69,7 +76,7 @@ async def stream_explanation(
             "event": "sources",
             "data": json.dumps([{
                 "page": source["page"],
-                "label": f"课本第{source['page']}页",
+                "label": source.get("label") or f"课本第{source['page']}页",
             }], ensure_ascii=False),
         }
         try:

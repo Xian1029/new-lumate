@@ -14,9 +14,11 @@ Extracted from document_loader.py.
 import csv
 import logging
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
-from services.content_text import normalize_pdf_markdown
+from services.content_text import clean_course_text, normalize_pdf_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -406,6 +408,60 @@ def _extract_legacy_office_text(file_path: str) -> tuple[str, str]:
     legacy loaders are unavailable, extracting readable text runs only.
     """
     title = Path(file_path).stem
+
+    # Binary DOC/PPT containers contain large amounts of XML/schema/style
+    # metadata. Decoding the raw bytes directly makes those implementation
+    # strings look like lesson content and pollutes both the outline and the
+    # knowledge graph. Prefer purpose-built, offline readers when available.
+    suffix = Path(file_path).suffix.lower()
+    commands: list[list[str]] = []
+    if suffix == ".doc":
+        if shutil.which("antiword"):
+            commands.append(["antiword", "-m", "UTF-8.txt", file_path])
+        if shutil.which("catdoc"):
+            commands.append(["catdoc", "-d", "utf-8", file_path])
+    elif suffix == ".ppt" and shutil.which("catppt"):
+        commands.append(["catppt", "-d", "utf-8", file_path])
+
+    extracted_candidates: list[str] = []
+    for command in commands:
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=45,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if completed.returncode != 0 or not completed.stdout:
+            continue
+        for encoding in ("utf-8", "gb18030"):
+            try:
+                decoded = completed.stdout.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+            cleaned = clean_course_text(decoded.replace("\f", "\n\n")) or ""
+            if len(cleaned) >= 80:
+                extracted_candidates.append(cleaned)
+                break
+
+    if extracted_candidates:
+        metadata_terms = re.compile(
+            r"(?:xml架构|namespace|文档属性|修订兼容性|排版控制|内置标记|"
+            r"字符串标记|变量标记|数据类型标记|预处理器标记)",
+            re.IGNORECASE,
+        )
+
+        def content_score(value: str) -> int:
+            readable = len(re.findall(r"[\u4e00-\u9fffA-Za-z0-9]", value))
+            return readable - 80 * len(metadata_terms.findall(value))
+
+        best = max(extracted_candidates, key=content_score)
+        if content_score(best) > 40:
+            return title, best
+
     try:
         raw = Path(file_path).read_bytes()
     except OSError as exc:
@@ -420,7 +476,15 @@ def _extract_legacy_office_text(file_path: str) -> tuple[str, str]:
             cleaned = re.sub(r"\s+", " ", run).strip()
             if cleaned and cleaned not in runs:
                 runs.append(cleaned)
-    text = "\n\n".join(runs[:500])
+    # Last-resort raw recovery must not expose Office implementation metadata
+    # as learning content. Lines containing those signatures are discarded;
+    # if nothing useful remains, show the explicit conversion guidance below.
+    metadata_line = re.compile(
+        r"(?:xml架构|namespace|文档属性|修订兼容性|排版控制|内置标记|"
+        r"字符串标记|变量标记|数据类型标记|预处理器标记|w:document|office:)",
+        re.IGNORECASE,
+    )
+    text = "\n\n".join(run for run in runs[:500] if not metadata_line.search(run))
     if text:
         return title, text
     return title, f"# {title}\n\n此旧版 Office 文件已保存，但暂未提取到可读正文。请在原文件中查看内容后重试导出为 DOCX 或 PPTX。"
@@ -430,6 +494,9 @@ def _extract_docx_fallback(file_path: str) -> tuple[str, str]:
     """DOCX fallback: extract paragraphs + tables via python-docx."""
     try:
         from docx import Document
+        from docx.table import Table
+        from docx.text.paragraph import Paragraph
+        from docx.oxml.ns import qn
 
         doc = Document(file_path)
         parts: list[str] = []
@@ -438,9 +505,12 @@ def _extract_docx_fallback(file_path: str) -> tuple[str, str]:
         # DOCX files lose their semantic structure and the downstream tree
         # builder sees one long wall of text.  Body paragraphs remain plain
         # text, so existing maths/English extraction is unchanged.
-        for para in doc.paragraphs:
-            text = para.text.strip()
-            if text:
+        for block in doc.element.body.iterchildren():
+            if block.tag == qn("w:p"):
+                para = Paragraph(block, doc)
+                text = para.text.strip()
+                if not text:
+                    continue
                 style_name = str(getattr(getattr(para, "style", None), "name", "") or "")
                 heading_match = re.search(r"(?:heading|标题)\s*([1-6])", style_name, re.IGNORECASE)
                 if heading_match:
@@ -449,14 +519,13 @@ def _extract_docx_fallback(file_path: str) -> tuple[str, str]:
                     parts.append(f"# {text}")
                 else:
                     parts.append(text)
-
-        # Extract tables as markdown
-        for table in doc.tables:
-            md_table = _table_to_markdown(
-                [[cell.text.strip() for cell in row.cells] for row in table.rows]
-            )
-            if md_table:
-                parts.append(md_table)
+            elif block.tag == qn("w:tbl"):
+                table = Table(block, doc)
+                md_table = _table_to_markdown(
+                    [[cell.text.strip() for cell in row.cells] for row in table.rows]
+                )
+                if md_table:
+                    parts.append(md_table)
 
         return Path(file_path).stem, "\n\n".join(parts)
     except ImportError:
@@ -468,24 +537,56 @@ def _extract_docx_fallback(file_path: str) -> tuple[str, str]:
 
 
 def _extract_pptx_fallback(file_path: str) -> tuple[str, str]:
-    """PPTX fallback: extract slide text + speaker notes via python-pptx."""
+    """Extract PPTX in slide order while retaining presentation hierarchy.
+
+    Section-divider slides become level-1 Markdown headings and ordinary slide
+    titles become level-2 headings.  This mirrors Word heading styles and lets
+    the shared document tree parser build a useful chapter -> topic outline
+    instead of exposing every slide as an unrelated top-level chapter.
+    """
     try:
         from pptx import Presentation
 
         prs = Presentation(file_path)
         parts: list[str] = []
 
-        for slide_num, slide in enumerate(prs.slides, 1):
-            slide_parts: list[str] = [f"## Slide {slide_num}"]
+        chapter_marker = re.compile(
+            r"^(?:chapter|part|section)\s*0*\d+\b|^第\s*[一二三四五六七八九十百千万\d]+\s*(?:章|部分|篇|单元)\b",
+            re.IGNORECASE,
+        )
 
-            # Shape text
+        def clean_block(value: str) -> str:
+            return "\n".join(
+                re.sub(r"[ \t]+", " ", line).strip()
+                for line in value.replace("\r", "\n").split("\n")
+                if line.strip()
+            ).strip()
+
+        def learner_title(candidates: list[str], fallback: str) -> str:
+            for value in candidates:
+                for line in value.split("\n"):
+                    candidate = line.strip(" -•\t")
+                    if (
+                        candidate
+                        and not chapter_marker.match(candidate)
+                        and not re.fullmatch(r"(?:目录\s*/?\s*contents?|contents?)", candidate, re.IGNORECASE)
+                        and not re.fullmatch(r"\d{1,3}", candidate)
+                    ):
+                        return candidate[:120]
+            return fallback
+
+        for slide_num, slide in enumerate(prs.slides, 1):
+            text_blocks: list[str] = []
+            table_blocks: list[str] = []
+
+            # Shape iteration follows PowerPoint's z-order and therefore keeps
+            # the source reading order substantially better than Unstructured.
             for shape in slide.shapes:
                 if shape.has_text_frame:
-                    text = shape.text_frame.text.strip()
+                    text = clean_block(shape.text_frame.text)
                     if text:
-                        slide_parts.append(text)
+                        text_blocks.append(text)
 
-                # Tables inside slides
                 if shape.has_table:
                     rows = [
                         [cell.text.strip() for cell in row.cells]
@@ -493,13 +594,40 @@ def _extract_pptx_fallback(file_path: str) -> tuple[str, str]:
                     ]
                     md_table = _table_to_markdown(rows)
                     if md_table:
-                        slide_parts.append(md_table)
+                        table_blocks.append(md_table)
+
+            native_title = ""
+            title_shape = getattr(slide.shapes, "title", None)
+            if title_shape is not None and getattr(title_shape, "has_text_frame", False):
+                native_title = clean_block(title_shape.text_frame.text)
+
+            layout_name = str(getattr(getattr(slide, "slide_layout", None), "name", "") or "")
+            has_chapter_marker = any(chapter_marker.match(line.strip()) for block in text_blocks for line in block.split("\n"))
+            is_section_slide = has_chapter_marker or bool(re.search(r"section|章节|节标题", layout_name, re.IGNORECASE))
+            is_toc_slide = any(re.fullmatch(r"(?:目录\s*/?\s*contents?|contents?)", line.strip(), re.IGNORECASE) for block in text_blocks for line in block.split("\n"))
+
+            title_candidates = ([native_title] if native_title else []) + text_blocks
+            title = learner_title(title_candidates, f"第 {slide_num} 页")
+            slide_parts: list[str] = [f"<!-- OPENTUTOR_SLIDE:{slide_num} -->"]
+            # Cover and contents remain useful source text but should not
+            # become learner-facing chapters. A real section divider starts a
+            # chapter; all other titled slides are topics within that chapter.
+            heading_emitted = slide_num > 1 and not is_toc_slide
+            if heading_emitted:
+                slide_parts.append(f"{'#' if is_section_slide else '##'} {title}")
+
+            for text in text_blocks:
+                compact = re.sub(r"\s+", " ", text).strip()
+                if (heading_emitted and compact == re.sub(r"\s+", " ", title).strip()) or chapter_marker.fullmatch(compact):
+                    continue
+                slide_parts.append(text)
+            slide_parts.extend(table_blocks)
 
             # Speaker notes
             if slide.has_notes_slide and slide.notes_slide.notes_text_frame:
-                notes = slide.notes_slide.notes_text_frame.text.strip()
+                notes = clean_block(slide.notes_slide.notes_text_frame.text)
                 if notes:
-                    slide_parts.append(f"**Notes:** {notes}")
+                    slide_parts.append(f"**演讲者备注：** {notes}")
 
             parts.append("\n\n".join(slide_parts))
 
