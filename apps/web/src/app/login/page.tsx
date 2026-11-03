@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BookOpen, BrainCircuit, Eye, EyeOff, Loader2, LockKeyhole, Sparkles, Target, UserRound } from "lucide-react";
-import { login } from "@/lib/account";
+import { BookOpen, BrainCircuit, CirclePause, Eye, EyeOff, Loader2, LockKeyhole, Sparkles, Target, UserRound } from "lucide-react";
+import { AccountError, login } from "@/lib/account";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -12,10 +12,17 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [accountDisabled, setAccountDisabled] = useState(false);
+  const usernameInput = useRef<HTMLInputElement>(null);
+
+  const clearFeedback = () => {
+    setError("");
+    setAccountDisabled(false);
+  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    setError("");
+    clearFeedback();
     setSubmitting(true);
     try {
       const user = await login(username, password);
@@ -32,7 +39,11 @@ export default function LoginPage() {
         && !settings.personal_key_configured;
       router.replace(needsPersonalKey ? "/settings/ai?welcome=1" : "/");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "登录失败，请稍后重试");
+      if (reason instanceof AccountError && reason.code === "account_disabled") {
+        setAccountDisabled(true);
+      } else {
+        setError(reason instanceof Error ? reason.message : "登录失败，请稍后重试");
+      }
       setSubmitting(false);
     }
   };
@@ -86,19 +97,31 @@ export default function LoginPage() {
                 <span className="text-sm font-medium text-[#34443d]">用户名</span>
                 <div data-focus-shell className="flex h-13 items-center rounded-xl border border-[#deddd7] bg-[#fbfaf7] px-4 transition focus-within:border-[#789081] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#789081]/10">
                   <UserRound className="mr-3 h-4.5 w-4.5 shrink-0 text-[#8d9993]" />
-                  <input required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="请输入用户名" style={{ outline: "none" }} className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent text-sm shadow-none !outline-none focus-visible:!outline-none placeholder:text-[#a8aaa7]" />
+                  <input ref={usernameInput} required autoComplete="username" value={username} onChange={(event) => { setUsername(event.target.value); clearFeedback(); }} placeholder="请输入用户名" style={{ outline: "none" }} className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent text-sm shadow-none !outline-none focus-visible:!outline-none placeholder:text-[#a8aaa7]" />
                 </div>
               </label>
               <label className="block space-y-2">
                 <span className="text-sm font-medium text-[#34443d]">密码</span>
                 <div data-focus-shell className="flex h-13 items-center rounded-xl border border-[#deddd7] bg-[#fbfaf7] px-4 transition focus-within:border-[#789081] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#789081]/10">
                   <LockKeyhole className="mr-3 h-4.5 w-4.5 shrink-0 text-[#8d9993]" />
-                  <input required autoComplete="current-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" style={{ outline: "none" }} className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent text-sm shadow-none !outline-none focus-visible:!outline-none placeholder:text-[#a8aaa7]" />
+                  <input required autoComplete="current-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => { setPassword(event.target.value); clearFeedback(); }} placeholder="请输入密码" style={{ outline: "none" }} className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent text-sm shadow-none !outline-none focus-visible:!outline-none placeholder:text-[#a8aaa7]" />
                   <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "隐藏密码" : "显示密码"} className="rounded-lg p-1.5 text-[#8d9993] transition hover:bg-[#eef1ed] hover:text-[#53695e]">
                     {showPassword ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
                   </button>
                 </div>
               </label>
+              {accountDisabled && (
+                <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-amber-950">
+                  <div className="flex items-start gap-3">
+                    <CirclePause aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+                    <div className="space-y-2">
+                      <p className="text-sm font-semibold">账号已暂停使用</p>
+                      <p className="text-sm leading-6">你的学习数据仍然保留。请联系管理员，在「成员管理」中恢复账号后重新登录。</p>
+                      <button type="button" className="rounded text-sm font-semibold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-4" onClick={() => { setUsername(""); setPassword(""); clearFeedback(); usernameInput.current?.focus(); }}>使用其他账号登录</button>
+                    </div>
+                  </div>
+                </div>
+              )}
               {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">{error}</div>}
               <button disabled={submitting} className="flex h-13 w-full items-center justify-center gap-2 rounded-xl bg-[#2c473d] font-semibold text-white shadow-[0_10px_24px_rgba(44,71,61,0.20)] transition hover:-translate-y-0.5 hover:bg-[#36564a] hover:shadow-[0_14px_30px_rgba(44,71,61,0.25)] disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0">
                 {submitting ? <><Loader2 className="h-4 w-4 animate-spin" />正在登录...</> : "进入我的学习空间"}
