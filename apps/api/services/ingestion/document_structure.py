@@ -27,6 +27,11 @@ _QUESTION_TYPE = re.compile(
     r"(?:\s*[（(][^）)]{0,40}[）)])?\s*[：:]?$"
 )
 _QUESTION_LINE = re.compile(r"^\s*\d{1,3}\s*[.．、)）]\s*\S+")
+_ASSESSMENT_ANSWER_CUE = re.compile(
+    r"_{2,}|（\s*）|\(\s*\)|(?:本题|每题|共)\s*\d+\s*分|"
+    r"(?:请选择|求证|证明|计算|解答|作图|填空)|"
+    r"(?:^|\s)[A-D][.．、]\s*\S+"
+)
 _ANSWER_SECTION = re.compile(
     r"^\s*(?:参考)?答案(?:与|及)?(?:试题)?解析\s*$|^\s*参考答案\s*$|^\s*试题解析\s*$"
 )
@@ -111,9 +116,11 @@ def is_question_only_document(filename: str, markdown: str) -> bool:
     if re.search(r"试卷|测试|练习|作业|考试|月考|期中|期末|模拟题|题库|测验|卷子", name):
         return True
     lines = [re.sub(r"^\s*#{1,6}\s+", "", line).strip() for line in (markdown or "").splitlines()]
-    questions = sum(bool(_QUESTION_LINE.match(line)) for line in lines)
+    numbered_questions = [line for line in lines if _QUESTION_LINE.match(line)]
+    questions = len(numbered_questions)
     groups = sum(bool(_QUESTION_TYPE.match(line)) for line in lines)
-    return questions >= 5 and (groups >= 1 or questions >= 10) and not is_k12_textbook_document(filename, markdown)
+    answer_cues = sum(bool(_ASSESSMENT_ANSWER_CUE.search(line)) for line in numbered_questions)
+    return questions >= 5 and (groups >= 1 or (questions >= 10 and answer_cues >= 2)) and not is_k12_textbook_document(filename, markdown)
 
 
 def assessment_excerpt(markdown: str, max_chars: int = 4000) -> str:
@@ -194,11 +201,7 @@ def structure_non_textbook_document(markdown: str, filename: str) -> tuple[str, 
     preliminary_lines = [line.strip() for line in plain_source.splitlines() if line.strip()]
     preliminary_types = [line for line in preliminary_lines if _QUESTION_TYPE.match(line)]
     preliminary_questions = [line for line in preliminary_lines if _QUESTION_LINE.match(line)]
-    preliminary_answer_cues = sum(bool(re.search(
-        r"[？?]|_{2,}|（\s*）|\(\s*\)|(?:本题|每题|共)\s*\d+\s*分|"
-        r"(?:请选择|求证|证明|计算|解答|作图|填空)",
-        line,
-    )) for line in preliminary_questions)
+    preliminary_answer_cues = sum(bool(_ASSESSMENT_ANSWER_CUE.search(line)) for line in preliminary_questions)
     likely_assessment = bool(
         assessment_name
         or preliminary_types
@@ -243,11 +246,7 @@ def structure_non_textbook_document(markdown: str, filename: str) -> tuple[str, 
 
     question_lines = [line for line in cleaned_lines if _QUESTION_LINE.match(line)]
     question_type_lines = [line for line in cleaned_lines if _QUESTION_TYPE.match(line)]
-    answer_cues = sum(bool(re.search(
-        r"[？?]|_{2,}|（\s*）|\(\s*\)|(?:本题|每题|共)\s*\d+\s*分|"
-        r"(?:请选择|求证|证明|计算|解答|作图|填空)",
-        line,
-    )) for line in question_lines)
+    answer_cues = sum(bool(_ASSESSMENT_ANSWER_CUE.search(line)) for line in question_lines)
     is_assessment = likely_assessment or bool(
         question_type_lines or (len(question_lines) >= 5 and answer_cues >= 2)
     )
