@@ -8,6 +8,7 @@ import { LEARNING_HOME_INVALIDATION_EVENT } from "@/lib/api/client";
 import { useWorkspaceStore } from "@/store/workspace";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { MarkdownRenderer } from "@/components/shared/markdown-renderer";
 import { SkeletonText } from "@/components/ui/skeleton";
 
 interface FlashcardReviewViewProps {
@@ -135,11 +136,11 @@ export function FlashcardReviewView({ courseId }: FlashcardReviewViewProps) {
               </div>
               <div className="mt-3 min-w-0 rounded-xl bg-muted/35 px-3 py-3">
                 <p className="text-xs font-medium text-violet-700 dark:text-violet-300">{t("flashcard.review.front")}</p>
-                <p className="mt-1 min-w-0 whitespace-pre-wrap break-words text-sm font-medium leading-6 [overflow-wrap:anywhere]">{card.front}</p>
+                <MarkdownRenderer content={card.front} className="mt-1 min-w-0 whitespace-pre-wrap break-words text-sm font-medium leading-6 [overflow-wrap:anywhere] [&_p]:my-0" />
               </div>
               <div className="mt-2 min-w-0 border-l-2 border-emerald-300 px-3 py-2 dark:border-emerald-700">
                 <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">{t("flashcard.review.back")}</p>
-                <p className="mt-1 min-w-0 whitespace-pre-wrap break-words text-sm leading-6 text-foreground/80 [overflow-wrap:anywhere]">{card.back}</p>
+                <MarkdownRenderer content={card.back} className="mt-1 min-w-0 whitespace-pre-wrap break-words text-sm leading-6 text-foreground/80 [overflow-wrap:anywhere] [&_p]:my-0" />
               </div>
               <Button
                 type="button"

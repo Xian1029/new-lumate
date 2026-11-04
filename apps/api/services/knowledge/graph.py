@@ -213,6 +213,17 @@ async def build_knowledge_graph(
     # always takes the awaited branch.
     content_result = await content_query if inspect.isawaitable(content_query) else None
     all_content_nodes = list(content_result.scalars().all()) if content_result is not None else []
+    if all_content_nodes:
+        from services.ingestion.document_structure import is_reference_only_document
+        if all(
+            (node.content_category or "").lower() == "reference"
+            or is_reference_only_document(node.source_file or "", node.content or "")
+            for node in all_content_nodes
+        ):
+            return {
+                "course_id": str(course_id), "nodes": [], "edges": [],
+                "coverage": {"learnable_content_count": 0, "represented_content_count": 0, "material_count": 0},
+            }
     content_by_id = {item.id: item for item in all_content_nodes}
 
     def material_key_for_content(content_id: uuid.UUID | None) -> str | None:
@@ -343,6 +354,10 @@ async def build_knowledge_graph(
     # do not require a write during a GET request.
     for content_node in ordered_learnable_nodes:
         if content_node.id in represented_content_ids:
+            continue
+        # Question-type headings are navigation, not concepts. Assessment
+        # graphs consist of extracted semantic knowledge nodes only.
+        if (content_node.content_category or "").lower() == "assessment":
             continue
         material_id = material_key_for_content(content_node.id) or getattr(content_node, "source_file", None) or "未分类资料"
         material_title, chapter_title = curriculum_context_for_content(content_node.id)

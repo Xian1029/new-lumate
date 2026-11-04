@@ -3,6 +3,8 @@
 import { lazy } from "react";
 import { useT } from "@/lib/i18n-context";
 import { TabbedSection, type TabDef } from "./tabbed-section";
+import { useCourseStore } from "@/store/course";
+import { hasStudyContent } from "@/lib/content-tree";
 
 const ProgressView = lazy(() =>
   import("./analytics/progress-view").then((m) => ({ default: m.ProgressView })),
@@ -35,12 +37,15 @@ type AnalyticsTab = "progress" | "review" | "blindspots" | "forecast" | "graph" 
 
 export function AnalyticsSection({ courseId, defaultTab = "progress" }: AnalyticsSectionProps) {
   const t = useT();
+  const contentTree = useCourseStore((s) => s.contentTree);
+  const contentTreeCourseId = useCourseStore((s) => s.contentTreeCourseId);
+  const showGraph = contentTreeCourseId === courseId && hasStudyContent(contentTree);
   const tabs: TabDef<AnalyticsTab>[] = [
     { id: "progress", label: t("analytics.tab.progress"), testId: "right-tab-progress" },
     { id: "review", label: t("analytics.tab.review"), testId: "right-tab-review" },
     { id: "blindspots", label: t("analytics.tab.blindspots"), testId: "right-tab-blindspots" },
     { id: "forecast", label: t("analytics.tab.forecast"), testId: "right-tab-forecast" },
-    { id: "graph", label: t("analytics.tab.graph"), testId: "right-tab-graph" },
+    ...(showGraph ? [{ id: "graph" as const, label: t("analytics.tab.graph"), testId: "right-tab-graph" }] : []),
     { id: "agent", label: t("analytics.tab.agent"), testId: "right-tab-agent" },
     { id: "profile", label: t("analytics.tab.profile") },
   ];

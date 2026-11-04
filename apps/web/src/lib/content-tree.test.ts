@@ -7,8 +7,10 @@ import {
   findPathToNode,
   getContentNodeMaterialKey,
   getPreferredLearningNode,
+  hasStudyContent,
   isLearnableContentNode,
   isPracticeEligibleContentNode,
+  isStudyEligibleContentNode,
 } from "./content-tree";
 import type { ContentNode } from "@/lib/api";
 
@@ -64,6 +66,14 @@ describe("getPreferredLearningNode", () => {
 });
 
 describe("content-tree helpers", () => {
+  it("allows a short readable assessment section to display its AI note", () => {
+    const section: ContentNode = {
+      id: "fill-blank", title: "二、填空题", type: "section",
+      content: "7. 已知角平分线，求这个角的度数。", level: 2,
+      order_index: 0, source_type: "file", content_category: "assessment", children: [],
+    };
+    expect(isStudyEligibleContentNode(section)).toBe(true);
+  });
   it("finds the first node with content", () => {
     expect(findFirstContentNode(tree)?.id).toBe("node-a");
   });
@@ -116,7 +126,19 @@ describe("content-tree helpers", () => {
   it("requires a specific leaf lesson for practice", () => {
     const sectionWithChildren: ContentNode = { ...tree[0], content: "Chapter overview" };
     expect(isPracticeEligibleContentNode(sectionWithChildren)).toBe(false);
-    expect(isPracticeEligibleContentNode(tree[0].children![0])).toBe(true);
+    expect(isPracticeEligibleContentNode({ ...tree[0].children![0], content: "二分查找通过反复比较中间元素缩小搜索范围。".repeat(5) })).toBe(true);
+  });
+
+  it("keeps a business report readable without offering study generation", () => {
+    const report: ContentNode = {
+      ...tree[0].children![0],
+      content: "作品数量和账号表现的原始分析内容。".repeat(8),
+      source_file: "陕西某公司作品情况分析.docx",
+      content_category: "notes",
+    };
+    expect(isLearnableContentNode(report)).toBe(true);
+    expect(hasStudyContent([report])).toBe(false);
+    expect(isPracticeEligibleContentNode(report)).toBe(false);
   });
 
   it("resolves material context from an ancestor for older imported trees", () => {

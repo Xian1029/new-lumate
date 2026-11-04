@@ -558,12 +558,16 @@ async def run_ingestion_pipeline(
             from services.ingestion.document_structure import (
                 document_quality_notice,
                 is_k12_textbook_document,
+                is_question_only_document,
                 structure_non_textbook_document,
             )
             is_k12_textbook = is_k12_textbook_document(filename, extracted)
             structure_report = {"strategy": "k12_textbook"}
             if not is_k12_textbook:
                 extracted, structure_report = structure_non_textbook_document(extracted, filename)
+                if is_question_only_document(filename, extracted):
+                    job.content_category = "assessment"
+                    job.classification_method = "document_profile"
                 # Exam papers use explicit question-type boundaries. Asking a
                 # general semantic model to regroup individual questions can
                 # make the directory unstable and is unnecessary.
@@ -582,6 +586,21 @@ async def run_ingestion_pipeline(
             quality_notice = document_quality_notice(extracted, filename, structure_report)
             if quality_notice:
                 job.page_stats = {**(job.page_stats or {}), "quality_notice": quality_notice}
+            if not is_k12_textbook:
+                from services.ingestion.document_structure import is_reference_only_document
+                if job.content_category != "assessment" and is_reference_only_document(
+                    filename, extracted,
+                    low_text=bool(quality_notice and quality_notice.get("code") == "LOW_TEXT_CONTENT"),
+                ):
+                    job.content_category = "reference"
+                    job.page_stats = {**(job.page_stats or {}), "learning_mode": "source_only"}
+                    if not quality_notice:
+                        job.page_stats = {**job.page_stats, "quality_notice": {
+                            "code": "SOURCE_READING_ONLY",
+                            "title": "这份资料已准备好精读",
+                            "message": "已保留完整原文。此类资料暂不生成学习笔记、测验、闪卡或知识图谱；可打开原文，选择文段使用 AI 精读。",
+                            "action": "none",
+                        }}
             job.extracted_markdown = extracted
         job.workflow_state = "CLASSIFIED"
         await db.commit()

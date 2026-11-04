@@ -1,6 +1,7 @@
 "use client";
 
 import { useT } from "@/lib/i18n-context";
+import { MarkdownRenderer } from "@/components/shared/markdown-renderer";
 
 interface QuizOptionsProps {
   optionKeys: string[];
@@ -66,7 +67,7 @@ export function QuizOptions({
           className={`w-full text-left rounded-xl border px-3.5 py-3 text-sm min-h-[44px] transition-colors ${optionStyle(key)} disabled:cursor-default`}
         >
           <span className="font-medium mr-2">{key.toUpperCase()}.</span>
-          {options[key]}
+          <MarkdownRenderer content={options[key]} className="inline-block align-top [&_p]:my-0" />
         </button>
       ))}
     </div>

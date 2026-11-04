@@ -24,7 +24,7 @@ import { useModeEvaluator, useInitPrompt } from "./_components/use-agent-lifecyc
 import { TemplatePicker } from "./_components/template-picker";
 import { SyncSettingsPanel } from "@/components/course/sync-settings-panel";
 import { EmptyMaterialsPrompt } from "@/components/course/empty-materials-prompt";
-import { findNodeById, isLearnableContentNode } from "@/lib/content-tree";
+import { findNodeById, isAssessmentOnlyCourse, isLearnableContentNode, isPracticeEligibleContentNode } from "@/lib/content-tree";
 import { CoursePlanStatus } from "@/components/learning-plans/course-plan-status";
 import { buildLayoutFromMode } from "@/lib/block-system/templates";
 
@@ -46,6 +46,7 @@ export default function CoursePage() {
   const notesDrawerOpen = useWorkspaceStore((s) => s.notesDrawerOpen);
   const setNotesDrawerOpen = useWorkspaceStore((s) => s.setNotesDrawerOpen);
   const setSelectedNodeId = useWorkspaceStore((s) => s.setSelectedNodeId);
+  const selectedNodeId = useWorkspaceStore((s) => s.selectedNodeId);
 
   const { health, course, courses, contentTree, aiActionsEnabled } = useCourseData(courseId);
   const { blocks, blocksInitialized } = useBlockPersistence(courseId, course);
@@ -92,6 +93,20 @@ export default function CoursePage() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [blocks, blocksInitialized, contentTree, requestedModule, requestedNodeId, resumeContext, setNotesDrawerOpen, setSelectedNodeId]);
+
+  useEffect(() => {
+    if (!isAssessmentOnlyCourse(contentTree) || requestedNodeId || resumeContext?.contentNodeId) return;
+    if (findNodeById(contentTree, selectedNodeId)) return;
+    const first = (items: typeof contentTree): string | null => {
+      for (const node of items) {
+        if (isPracticeEligibleContentNode(node)) return node.id;
+        const child = first(node.children ?? []);
+        if (child) return child;
+      }
+      return null;
+    };
+    setSelectedNodeId(first(contentTree));
+  }, [contentTree, requestedNodeId, resumeContext?.contentNodeId, selectedNodeId, setSelectedNodeId]);
 
   useEffect(() => {
     if (!isGuidedPlanSession || !blocksInitialized || guidedRecoveryRef.current === courseId) return;

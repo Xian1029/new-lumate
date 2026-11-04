@@ -19,7 +19,7 @@ import { resolveChapterNavigationNodes, UnitNavigation, SubsectionsNav } from ".
 import { StatsRow } from "./_components/stats-row";
 import { PracticePanel } from "./_components/practice-panel";
 import { GraphPanel } from "./_components/graph-panel";
-import { getContentNodeMaterialKey, getPreferredLearningNode, isPracticeEligibleContentNode } from "@/lib/content-tree";
+import { getContentNodeMaterialKey, getPreferredLearningNode, isPracticeEligibleContentNode, isSourceOnlyContentNode, isStudyEligibleContentNode } from "@/lib/content-tree";
 
 export default function UnitPage() {
   const params = useParams();
@@ -47,7 +47,15 @@ export default function UnitPage() {
   // Front matter, contents and document containers are navigable reference
   // nodes, not a valid question context.  Do not render an empty practice UI.
   const practiceEligible = node ? isPracticeEligibleContentNode(node) : false;
+  const studyEligible = node ? isStudyEligibleContentNode(node) : false;
+  const sourceOnly = node ? isSourceOnlyContentNode(node) : false;
   const activeMaterialId = getContentNodeMaterialKey(nodePath, nodeId);
+
+  useEffect(() => {
+    if (sourceOnly) {
+      router.replace(`/course/${courseId}/notes?node=${encodeURIComponent(nodeId)}`);
+    }
+  }, [sourceOnly, courseId, nodeId, router]);
 
   useEffect(() => {
     if (chapterLearningTarget && chapterLearningTarget.id !== nodeId) {
@@ -76,7 +84,7 @@ export default function UnitPage() {
     );
   }
 
-  if (chapterLearningTarget && chapterLearningTarget.id !== nodeId) {
+  if (sourceOnly || (chapterLearningTarget && chapterLearningTarget.id !== nodeId)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <p className="text-sm text-muted-foreground animate-pulse">{t("general.loading")}</p>
@@ -129,9 +137,9 @@ export default function UnitPage() {
           <PracticePanel courseId={courseId} difficultyLevel={difficultyRec.level} aiActionsEnabled={aiActionsEnabled} generatingFocusedQuiz={generatingFocusedQuiz} onGenerateFocusedQuiz={() => void handleGenerateFocusedQuiz()} t={t} tf={tf} />
         </ErrorBoundary> : null}
 
-        <ErrorBoundary section="knowledge graph">
+        {studyEligible ? <ErrorBoundary section="knowledge graph">
           <GraphPanel courseId={courseId} focusTerms={focusTerms} activeMaterialId={activeMaterialId} t={t} />
-        </ErrorBoundary>
+        </ErrorBoundary> : null}
 
         <section className="rounded-3xl border border-rose-100 bg-card p-6 shadow-[0_16px_48px_-38px_rgba(120,50,50,0.4)]">
           <h2 className="mb-1 text-xl font-bold">{t("unit.errorAnalysis")}</h2>

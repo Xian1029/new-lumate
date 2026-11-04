@@ -35,6 +35,10 @@ _REPORT_CAPTION_END = re.compile(
     r"(?:概览|详解|梳理|分析|说明|背景|目标|流程|框架|体系|模块|模式|机制|逻辑|"
     r"实施|评价|评估|总结|结论|建议|汇总|拆解|参与方式|培养方式|课程案例|核心问题)\s*[：:]?$"
 )
+_PROSE_HEADING_START = re.compile(r"^(?:例如|比如|尤其|其中|此外|因此|综上|总之|从.+(?:来看|来说)|内容中|其账号|代表作品)")
+_BUSINESS_REPORT_NAME = re.compile(r"(?:公司|企业|账号|作品情况|运营|财务|市场|商业|投融资|客户).{0,20}(?:分析|报告|汇总|概览|调研)|(?:分析|报告).{0,20}(?:公司|企业|账号|作品)")
+_OPERATIONS_DOCUMENT_NAME = re.compile(r"(?:合同|发票|收据|报价单|采购单|会议纪要|简历|行政通知|财务报表|运营周报|工作总结)")
+_STUDY_NAME = re.compile(r"(?:教材|教科书|课本|讲义|知识点|课程|学习|试卷|习题|练习|题库|教案)")
 _TEXTBOOK_NAME = re.compile(
     r"(?:义务教育教科书|教科书|教材|课本|教师用书|学生读本|"
     r"上册|下册|全一册|人教版|北师大版|苏教版|译林版)",
@@ -90,6 +94,88 @@ def _is_report_heading(line: str) -> tuple[bool, int]:
     return False, 0
 
 
+def is_reference_only_document(filename: str, markdown: str, *, low_text: bool = False) -> bool:
+    """Conservatively keep business reports and nearly empty files as reading sources.
+
+    Academic reports and ordinary handouts remain eligible for study features.
+    """
+    name = Path(filename or "").stem
+    if low_text and not is_question_only_document(filename, markdown):
+        return True
+    return bool((_BUSINESS_REPORT_NAME.search(name) or _OPERATIONS_DOCUMENT_NAME.search(name)) and not _STUDY_NAME.search(name))
+
+
+def is_question_only_document(filename: str, markdown: str) -> bool:
+    """Identify assessment materials independently of their file format."""
+    name = Path(filename or "").stem
+    if re.search(r"试卷|测试|练习|作业|考试|月考|期中|期末|模拟题|题库|测验|卷子", name):
+        return True
+    lines = [re.sub(r"^\s*#{1,6}\s+", "", line).strip() for line in (markdown or "").splitlines()]
+    questions = sum(bool(_QUESTION_LINE.match(line)) for line in lines)
+    groups = sum(bool(_QUESTION_TYPE.match(line)) for line in lines)
+    return questions >= 5 and (groups >= 1 or questions >= 10) and not is_k12_textbook_document(filename, markdown)
+
+
+def assessment_excerpt(markdown: str, max_chars: int = 4000) -> str:
+    """Sample readable question text across a long section at bounded cost."""
+    lines = [
+        re.sub(r"\[(?:pic|image|图片)\]", "[图像内容未识别]", line, flags=re.IGNORECASE).strip()
+        for line in (markdown or "").splitlines()
+    ]
+    lines = [line for line in lines if line and line != "[图像内容未识别]"]
+    if not lines:
+        return ""
+    full = "\n".join(lines)
+    if len(full) <= max_chars:
+        return full
+    # Choose bounded line windows from the beginning, middle, and end. This
+    # avoids a 100-page paper being represented only by its first questions.
+    slots = max(3, min(30, max_chars // 140))
+    indices = sorted({round(i * (len(lines) - 1) / (slots - 1)) for i in range(slots)})
+    selected: list[str] = []
+    used = 0
+    for index in indices:
+        line = lines[index][:300]
+        if used + len(line) + 1 > max_chars:
+            break
+        selected.append(line)
+        used += len(line) + 1
+    return "\n".join(selected)
+
+
+def assessment_note_source(node, nodes: list, max_chars: int = 4000) -> str:
+    """Give each question/answer section its own grounded concept-note input."""
+    source = node.content or ""
+    if "【答案】" in source:
+        question = next((
+            item for item in nodes
+            if item.id != node.id and item.title == node.title
+            and item.content_category == "assessment"
+            and item.content and "【答案】" not in item.content
+        ), None)
+        if question:
+            source = f"题干：\n{question.content}\n\n对应解析：\n{source}"
+    return assessment_excerpt(source, max_chars)
+
+
+def is_unreadable_assessment(filename: str, markdown: str) -> bool:
+    """An exam missing its embedded formula/image content is not a safe quiz source."""
+    if not re.search(r"试卷|测试|练习|作业|考试|月考|期中|期末|模拟题|题库|测验", filename or ""):
+        return False
+    placeholders = len(re.findall(r"\[(?:pic|image|图片)\]", markdown or "", re.IGNORECASE))
+    questions = sum(bool(_QUESTION_LINE.match(line)) for line in (markdown or "").splitlines())
+    return placeholders >= 5 and (questions == 0 or placeholders >= questions)
+
+
+def _is_structural_source_heading(title: str, *, strict: bool = False) -> bool:
+    compact = re.sub(r"\s+", " ", title).strip()
+    if len(compact) > 42 or re.search(r"[，。！？；,!?;]", compact) or _PROSE_HEADING_START.match(compact):
+        return False
+    if re.match(r"^(?:第[一二三四五六七八九十百\d]+[章节单元]|\d+(?:\.\d+)*[.、．\s])", compact):
+        return True
+    return _is_report_heading(compact)[0] or (not strict and len(compact) <= 18)
+
+
 def structure_non_textbook_document(markdown: str, filename: str) -> tuple[str, dict]:
     """Add reliable headings to an exam/report while preserving full content."""
     source = clean_course_text(markdown) or ""
@@ -118,6 +204,15 @@ def structure_non_textbook_document(markdown: str, filename: str) -> tuple[str, 
         or preliminary_types
         or (len(preliminary_questions) >= 5 and preliminary_answer_cues >= 2)
     )
+    # Word styles can mark body fragments as headings. Preserve the text but
+    # demote sentence-like headings before the generic Markdown tree parser.
+    if not likely_assessment:
+        strict_report = is_reference_only_document(filename, source)
+        source = re.sub(
+            r"(?m)^(\s*)#{1,6}\s+([^\n]+)$",
+            lambda match: match.group(0) if _is_structural_source_heading(match.group(2), strict=strict_report) else match.group(1) + match.group(2),
+            source,
+        )
     source_heading_count = len(_MARKDOWN_HEADING.findall(source))
     if source_heading_count >= 2 and not likely_assessment:
         return source, {"strategy": "source_headings", "headings": source_heading_count}
@@ -221,6 +316,16 @@ def document_quality_notice(markdown: str, filename: str, structure_report: dict
     text = markdown or ""
     visible_chars = len(re.findall(r"[\u4e00-\u9fffA-Za-z0-9]", text))
     image_placeholders = len(re.findall(r"\[(?:pic|image|图片)\]", text, re.IGNORECASE))
+    if is_unreadable_assessment(filename, text):
+        return {
+            "code": "EXAM_MEDIA_UNREADABLE",
+            "title": "试卷中的公式和图片尚未识别完整",
+            "message": (
+                "已保留原文件；系统会从可识别的题干和解析中梳理知识点，生成知识图谱、测验和闪卡。"
+                "图片及公式中的具体题意仍需对照原件核对；可上传可搜索的 PDF/DOCX 提高准确度。"
+            ),
+            "action": "replace_optional",
+        }
     if image_placeholders >= 5:
         return {
             "code": "EMBEDDED_MEDIA_NOT_TEXT",

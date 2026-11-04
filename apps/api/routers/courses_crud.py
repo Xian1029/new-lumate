@@ -174,6 +174,12 @@ async def get_or_create_user(db: AsyncSession) -> User:
     return user
 
 
+@router.get("/creation-policy", summary="Current user's learning-space creation permission")
+async def get_creation_policy(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from services.course_creation_policy import course_creation_status
+    return await course_creation_status(db, user)
+
+
 @router.get("/", response_model=list[CourseResponse], summary="List all courses", description="Return all courses for the current user, ordered by creation date.")
 async def list_courses(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -340,6 +346,8 @@ async def empty_course_trash(user: User = Depends(get_current_user), db: AsyncSe
 
 @router.post("/", response_model=CourseResponse, status_code=201, summary="Create a course", description="Create a new course for the current user.")
 async def create_course(body: CourseCreate, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from services.course_creation_policy import ensure_course_creation_allowed
+    await ensure_course_creation_allowed(db, user)
     # New learning spaces must not depend on a browser-local first-visit
     # fallback. Persist the same mode-based baseline at creation time so every
     # entry point (upload wizard, direct API, import) starts with the complete

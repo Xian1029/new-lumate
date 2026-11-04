@@ -333,7 +333,15 @@ async def extract_course_concepts(
         )
     )
     content_nodes = result.scalars().all()
-    eligible = [n for n in content_nodes if n.content and len(n.content) > 200]
+    from services.content_text import is_assessment_content
+    eligible = [
+        n for n in content_nodes
+        if n.content and len(n.content) > 200
+        and is_assessment_content(
+            n.title, n.content, content_category=n.content_category,
+            level=n.level, source_file=n.source_file,
+        )
+    ]
     if not eligible:
         return []
 
@@ -348,8 +356,14 @@ async def extract_course_concepts(
     all_concepts: list[dict] = []
     extraction_chunks = _select_extraction_chunks(eligible)
     for content_node in extraction_chunks:
+        source = content_node.content
+        if content_node.content_category == "assessment":
+            from services.ingestion.document_structure import assessment_excerpt
+            source = assessment_excerpt(source, 3000)
+            if len(source) < 80:
+                continue
         chunk_concepts = await _extract_from_chunk(
-            client, content_node.title, content_node.content,
+            client, content_node.title, source,
         )
         all_concepts.extend(chunk_concepts)
 
@@ -422,6 +436,7 @@ async def extract_course_concepts(
             node.content_node_id = matched_content.id
 
     # Create edges
+    added_edges: set[tuple[uuid.UUID, uuid.UUID, str]] = set()
     for item in concepts_data[:max_nodes]:
         name = (item.get("name") or "").strip().lower()
         source = node_by_name.get(name)
@@ -430,7 +445,9 @@ async def extract_course_concepts(
 
         for prereq_name in item.get("prerequisites", []):
             target = node_by_name.get(prereq_name.strip().lower())
-            if target and target.id != source.id:
+            edge_key = (source.id, target.id, "prerequisite") if target else None
+            if target and target.id != source.id and edge_key not in added_edges:
+                added_edges.add(edge_key)
                 edge = KnowledgeEdge(
                     source_id=source.id,
                     target_id=target.id,
@@ -440,7 +457,9 @@ async def extract_course_concepts(
 
         for related_name in item.get("related", []):
             target = node_by_name.get(related_name.strip().lower())
-            if target and target.id != source.id:
+            edge_key = (source.id, target.id, "related") if target else None
+            if target and target.id != source.id and edge_key not in added_edges:
+                added_edges.add(edge_key)
                 edge = KnowledgeEdge(
                     source_id=source.id,
                     target_id=target.id,

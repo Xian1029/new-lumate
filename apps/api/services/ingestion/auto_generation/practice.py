@@ -104,16 +104,32 @@ async def auto_generate_quiz(
             note_by_node = await get_active_note_markdown_by_node(
                 db, user_id=user_id, course_id=course_id,
             )
+            graph_names: list[str] = []
+            if any(node.content_category == "assessment" for node in nodes):
+                from models.knowledge_graph import KnowledgeNode
+                graph_names = list((await db.execute(
+                    select(KnowledgeNode.name).where(KnowledgeNode.course_id == course_id)
+                )).scalars().all())
 
             problems: list[PracticeProblem] = []
             for node in nodes:
                 if is_assessment_content(
-                    node.title, node.content, content_category=node.content_category, level=node.level,
+                    node.title, node.content, content_category=node.content_category, level=node.level, source_file=node.source_file,
                 ):
                     note = note_by_node.get(str(node.id))
                     if not note:
                         continue
-                    outcome = await extract_questions(note, node.title, course_id, node.id)
+                    relevant_names = [name for name in graph_names if name in note or name in (node.content or "")][:20]
+                    outcome = await extract_questions(
+                        note, node.title, course_id, node.id,
+                        knowledge_blueprint="\n".join(relevant_names) if node.content_category == "assessment" and relevant_names else None,
+                    )
+                    if node.content_category == "assessment" and relevant_names:
+                        for problem in outcome.problems:
+                            core = str((problem.problem_metadata or {}).get("core_concept") or "")
+                            matched = [name for name in relevant_names if core and (name == core or name in core or core in name)][:3]
+                            if matched:
+                                problem.knowledge_points = matched
                     # ``extract_questions`` returns a structured outcome so
                     # callers can report discarded/repaired questions.  The
                     # old list contract survived here and made successful
@@ -153,7 +169,7 @@ async def _auto_generate_learning_content(
     eligible = [
         n for n in nodes
         if is_assessment_content(
-            n.title, n.content, content_category=n.content_category, level=n.level,
+            n.title, n.content, content_category=n.content_category, level=n.level, source_file=n.source_file,
         ) and len(n.content or "") > 300
     ]
     if not eligible:

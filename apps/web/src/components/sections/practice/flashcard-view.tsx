@@ -13,6 +13,8 @@ import {
 } from "@/lib/api";
 import { useBatchManager } from "@/hooks/use-batch-manager";
 import { useWorkspaceStore } from "@/store/workspace";
+import { useCourseStore } from "@/store/course";
+import { isAssessmentOnlyCourse } from "@/lib/content-tree";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -88,6 +90,10 @@ export function FlashcardView({
   const reviewFailedLabel = t("flashcard.reviewFailed");
   const refreshKey = useWorkspaceStore((s) => s.sectionRefreshKey["practice"]);
   const selectedNodeId = useWorkspaceStore((s) => s.selectedNodeId);
+  const contentTree = useCourseStore((s) => s.contentTree);
+  const contentTreeCourseId = useCourseStore((s) => s.contentTreeCourseId);
+  const assessmentCourse = contentTreeCourseId === courseId && isAssessmentOnlyCourse(contentTree);
+  const cardScopeNodeId = assessmentCourse ? null : selectedNodeId;
   const { saving, latestBatch, wrapSave } = useBatchManager({
     courseId,
     refreshSection: "practice",
@@ -107,7 +113,7 @@ export function FlashcardView({
   const restoredRef = useRef(false);
   const freshSessionRequestedRef = useRef(false);
   const ratingLockRef = useRef(false);
-  const { save, load, subscribe } = useFlashcardPersistence(courseId, selectedNodeId);
+  const { save, load, subscribe } = useFlashcardPersistence(courseId, cardScopeNodeId);
 
   useEffect(() => {
     restoredRef.current = false;
@@ -116,12 +122,12 @@ export function FlashcardView({
     setReviewed(0);
     setFlipped(false);
     freshSessionRequestedRef.current = false;
-  }, [selectedNodeId]);
+  }, [cardScopeNodeId]);
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!selectedNodeId) {
+    if (!selectedNodeId && !assessmentCourse) {
       setCards([]);
       setCourseDueCount(0);
       setLoadError(null);
@@ -137,7 +143,7 @@ export function FlashcardView({
         if (cancelled) return;
         let usableCards = uniqueFlashcards(cards.filter((card) =>
           isUsableFlashcard(card, locale) &&
-          (!selectedNodeId || card.content_node_id === selectedNodeId),
+          (assessmentCourse || card.content_node_id === selectedNodeId),
         ));
         setUseLector(isLector);
         // Restore session from localStorage (only once per mount)
@@ -177,7 +183,7 @@ export function FlashcardView({
                 Math.max(usableCards.length, 5),
                 mode,
                 usableCards.map((card) => card.front),
-                selectedNodeId,
+                cardScopeNodeId ?? undefined,
               );
               if (cancelled) return;
               const seenFronts = new Set(usableCards.map((card) => flashcardFrontKey(card.front)));
@@ -246,7 +252,7 @@ export function FlashcardView({
     return () => {
       cancelled = true;
     };
-  }, [courseId, refreshKey, retryCount, loadFailedLabel, locale, selectedNodeId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [courseId, refreshKey, retryCount, loadFailedLabel, locale, cardScopeNodeId, assessmentCourse, selectedNodeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => subscribe((saved) => {
     if (!saved) return;
@@ -262,7 +268,7 @@ export function FlashcardView({
     setLoading(true);
     try {
       const mode = useWorkspaceStore.getState().spaceLayout.mode ?? undefined;
-      const selectedNodeId = useWorkspaceStore.getState().selectedNodeId ?? undefined;
+      const selectedNodeId = cardScopeNodeId ?? undefined;
       const data = await generateFlashcards(courseId, 5, mode, undefined, selectedNodeId);
       const usableCards = uniqueFlashcards(data.cards.filter((card) => isUsableFlashcard(card, locale)));
       if (usableCards.length === 0) {
@@ -279,7 +285,7 @@ export function FlashcardView({
     } finally {
       setLoading(false);
     }
-  }, [courseId, t, locale, save]);
+  }, [cardScopeNodeId, courseId, t, locale, save]);
 
   const handleSave = useCallback(
     async (replaceBatchId?: string) => {
@@ -296,7 +302,7 @@ export function FlashcardView({
     setLoading(true);
     try {
       const mode = useWorkspaceStore.getState().spaceLayout.mode ?? undefined;
-      const selectedNodeId = useWorkspaceStore.getState().selectedNodeId ?? undefined;
+      const selectedNodeId = cardScopeNodeId ?? undefined;
       const generated = await generateFlashcards(
         courseId,
         Math.max(cards.length, 5),
@@ -330,7 +336,7 @@ export function FlashcardView({
     } finally {
       setLoading(false);
     }
-  }, [cards, courseId, latestBatch, locale, save, saving, submitting, t, wrapSave]);
+  }, [cardScopeNodeId, cards, courseId, latestBatch, locale, save, saving, submitting, t, wrapSave]);
 
   const restartCurrentCards = useCallback(() => {
     setIndex(0);
@@ -345,7 +351,7 @@ export function FlashcardView({
     setLoading(true);
     try {
       const mode = useWorkspaceStore.getState().spaceLayout.mode ?? undefined;
-      const selectedNodeId = useWorkspaceStore.getState().selectedNodeId ?? undefined;
+      const selectedNodeId = cardScopeNodeId ?? undefined;
       const generated = await generateFlashcards(
         courseId,
         Math.max(cards.length, 5),
@@ -370,7 +376,7 @@ export function FlashcardView({
     } finally {
       setLoading(false);
     }
-  }, [cards, courseId, loading, locale, save, submitting]);
+  }, [cardScopeNodeId, cards, courseId, loading, locale, save, submitting]);
 
   const handleFlip = useCallback(() => {
     if (submitting) return;
@@ -429,7 +435,7 @@ export function FlashcardView({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [flipped, submitting, handleRate]);
 
-  if (!selectedNodeId) {
+  if (!selectedNodeId && !assessmentCourse) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
         <h3 className="mb-1 text-sm font-medium">{t("flashcard.chooseChapterTitle")}</h3>

@@ -78,7 +78,7 @@ export function ContentBlock({ node, courseId }: { node: ContentNode; courseId: 
         <h3 className={`font-bold text-foreground ${sizeClass}`}>{node.title}</h3>
         {sourceUrl ? (
           <a
-            href={sourceState?.jobId && (sourceUrl.toLowerCase().includes(".pdf") || normalizedFileName(node.source_file).endsWith(".pdf"))
+            href={sourceState?.jobId && (node.content_category === "assessment" || sourceUrl.toLowerCase().includes(".pdf") || normalizedFileName(node.source_file).endsWith(".pdf"))
               ? `/course/${courseId}/notes?reader=${encodeURIComponent(sourceState.jobId)}&page=${sourceState.page ?? 1}&node=${encodeURIComponent(node.id)}&from=unit`
               : sourceUrl}
             className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs font-semibold text-emerald-800 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50"

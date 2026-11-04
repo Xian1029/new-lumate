@@ -177,7 +177,7 @@ async def generate_flashcards(
         nodes = [
             n for n in nodes
             if n and is_assessment_content(
-                n.title, n.content, content_category=n.content_category,
+                n.title, n.content, content_category=n.content_category, source_file=n.source_file,
             )
         ]
     else:
@@ -189,7 +189,7 @@ async def generate_flashcards(
         nodes = [
             node for node in result.scalars().all()
             if is_assessment_content(
-                node.title, node.content, content_category=node.content_category, level=node.level,
+                node.title, node.content, content_category=node.content_category, level=node.level, source_file=node.source_file,
             )
         ][:5]
 

@@ -57,6 +57,23 @@ async def auto_prepare(
     # Notes are the canonical K-12 learning representation. Generate them
     # first, then derive both recall formats from the same per-section notes.
     notes_result = await _safe_notes()
+    # For a question-only upload, cards must be tagged with the semantic
+    # concepts extracted from its stems. Other document profiles retain their
+    # existing preparation order.
+    async with db_factory() as db:
+        from models.content import CourseContentTree
+        from sqlalchemy import select
+        rows = (await db.execute(select(CourseContentTree).where(CourseContentTree.course_id == course_id))).scalars().all()
+        readable_rows = [row for row in rows if row.level > 0 and len((row.content or "").strip()) >= 80]
+        assessment_only = bool(readable_rows) and all(row.content_category == "assessment" for row in readable_rows)
+    early_graph_count: int | None = None
+    if assessment_only:
+        try:
+            from services.loom_graph import build_course_graph
+            early_graph_count = await build_course_graph(db_factory, course_id)
+        except (ImportError, sa.exc.SQLAlchemyError, ConnectionError, TimeoutError, ValueError, RuntimeError, OSError):
+            logger.exception("auto_prepare: assessment graph building failed")
+            early_graph_count = 0
     results = await _asyncio.gather(
         _safe_flashcards(), _safe_quiz(),
         return_exceptions=True,
@@ -87,16 +104,34 @@ async def auto_prepare(
         logger.exception("auto_prepare: auto-configure step failed")
         summary["auto_configured"] = False
 
+    # Reading-only files have no study concepts to map. Keep their source
+    # available without inventing a knowledge graph from report headings.
+    async with db_factory() as db:
+        from models.content import CourseContentTree
+        from services.content_text import is_assessment_content
+        from sqlalchemy import select
+        rows = (await db.execute(select(CourseContentTree).where(CourseContentTree.course_id == course_id))).scalars().all()
+        has_study_material = any(is_assessment_content(
+            row.title, row.content, content_category=row.content_category,
+            level=row.level, source_file=row.source_file,
+        ) for row in rows)
+
     # LOOM: Build knowledge concept graph from content
-    try:
-        from services.loom_graph import build_course_graph
-        summary["loom_concepts"] = await build_course_graph(db_factory, course_id)
-    except ImportError:
-        logger.debug("LOOM module not available, skipping graph building")
+    if not has_study_material:
         summary["loom_concepts"] = 0
-    except (sa.exc.SQLAlchemyError, ConnectionError, TimeoutError, ValueError, RuntimeError, OSError):
-        logger.exception("auto_prepare: LOOM graph building failed")
-        summary["loom_concepts"] = 0
+        return summary
+    if early_graph_count is not None:
+        summary["loom_concepts"] = early_graph_count
+    else:
+        try:
+            from services.loom_graph import build_course_graph
+            summary["loom_concepts"] = await build_course_graph(db_factory, course_id)
+        except ImportError:
+            logger.debug("LOOM module not available, skipping graph building")
+            summary["loom_concepts"] = 0
+        except (sa.exc.SQLAlchemyError, ConnectionError, TimeoutError, ValueError, RuntimeError, OSError):
+            logger.exception("auto_prepare: LOOM graph building failed")
+            summary["loom_concepts"] = 0
 
     logger.info("auto_prepare complete for course %s: %s", course_id, summary)
     return summary

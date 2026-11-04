@@ -11,9 +11,12 @@ import {
   type AnswerResult,
 } from "@/lib/api";
 import { useWorkspaceStore } from "@/store/workspace";
+import { useCourseStore } from "@/store/course";
+import { isAssessmentOnlyCourse } from "@/lib/content-tree";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
+import { MarkdownRenderer } from "@/components/shared/markdown-renderer";
 import { toast } from "sonner";
 import { AiFeatureBlocked } from "@/components/shared/ai-feature-blocked";
 import { SkeletonCard } from "@/components/ui/skeleton";
@@ -122,6 +125,10 @@ export function QuizView({
   const t = useT();
   const refreshKey = useWorkspaceStore((s) => s.sectionRefreshKey["practice"]);
   const selectedNodeId = useWorkspaceStore((s) => s.selectedNodeId);
+  const contentTree = useCourseStore((s) => s.contentTree);
+  const contentTreeCourseId = useCourseStore((s) => s.contentTreeCourseId);
+  const assessmentCourse = contentTreeCourseId === courseId && isAssessmentOnlyCourse(contentTree);
+  const listNodeId = assessmentCourse ? undefined : selectedNodeId ?? undefined;
   const [problems, setProblems] = useState<QuizProblem[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -153,12 +160,12 @@ export function QuizView({
   // Only the newest request may update the visible quiz session.
   const loadRequestRef = useRef(0);
   const [sessionBatchId, setSessionBatchId] = useState<string | null>(null);
-  const { save, load, clear, subscribe } = useQuizPersistence(courseId, selectedNodeId);
+  const { save, load, clear, subscribe } = useQuizPersistence(courseId, assessmentCourse ? null : selectedNodeId);
 
   const fetchData = useCallback(async () => {
     const requestId = ++loadRequestRef.current;
     setLoading(true);
-    if (!selectedNodeId) {
+    if (!selectedNodeId && !assessmentCourse) {
       if (requestId === loadRequestRef.current) {
         setProblems([]);
         setLoading(false);
@@ -166,7 +173,7 @@ export function QuizView({
       return;
     }
     try {
-      const items = await listProblems(courseId, selectedNodeId);
+      const items = await listProblems(courseId, listNodeId);
       const usableItems = items.filter(isUsableProblem);
       let sessionItems = usableItems;
       let nextBatchId: string | null = null;
@@ -224,14 +231,14 @@ export function QuizView({
               try {
                 const response = await extractQuiz(
                   courseId,
-                  selectedNodeId,
+                  selectedNodeId ?? undefined,
                   modeHint ?? useWorkspaceStore.getState().spaceLayout.mode ?? undefined,
                   difficultyHint,
                   true,
                   { retry: false, suppressErrorToast: true },
                 );
                 const freshIds = new Set(response.problem_ids ?? []);
-                const updatedItems = (await listProblems(courseId, selectedNodeId)).filter(isUsableProblem);
+                const updatedItems = (await listProblems(courseId, listNodeId)).filter(isUsableProblem);
                 const freshItems = updatedItems.filter((item) => freshIds.has(item.id));
                 if (freshItems.length) {
                   sessionItems = freshItems;
@@ -282,7 +289,7 @@ export function QuizView({
     } finally {
       if (requestId === loadRequestRef.current) setLoading(false);
     }
-  }, [aiActionsEnabled, clear, courseId, difficultyHint, load, modeHint, save, selectedNodeId]);
+  }, [aiActionsEnabled, assessmentCourse, clear, courseId, difficultyHint, listNodeId, load, modeHint, save, selectedNodeId]);
 
   useEffect(() => {
     loadRequestRef.current += 1;
@@ -293,7 +300,7 @@ export function QuizView({
     setAnsweredMap({});
     setSessionBatchId(null);
     freshSessionRequestedRef.current = false;
-  }, [selectedNodeId]);
+  }, [assessmentCourse, listNodeId]);
 
   useEffect(() => {
     void fetchData();
@@ -358,7 +365,7 @@ export function QuizView({
       }
       setExtractStatus(status);
       const generatedIds = new Set(res.problem_ids ?? []);
-      const generatedItems = (await listProblems(courseId, selectedNodeId))
+      const generatedItems = (await listProblems(courseId, listNodeId))
         .filter((item) => generatedIds.has(item.id))
         .filter(isUsableProblem);
       if (generatedItems.length) {
@@ -531,7 +538,7 @@ export function QuizView({
       if (!nodeId) throw new Error("请先选择要强化的小节");
       const response = await extractQuiz(courseId, nodeId, "maintenance", difficultyHint, true);
       const generatedIdSet = new Set(response.problem_ids ?? []);
-      const latest = (await listProblems(courseId, nodeId))
+      const latest = (await listProblems(courseId, assessmentCourse ? undefined : nodeId))
         .filter((item) => generatedIdSet.has(item.id))
         .filter(isUsableProblem);
       if (latest.length === 0) throw new Error("强化题已生成，但暂时无法载入");
@@ -542,7 +549,7 @@ export function QuizView({
     } finally {
       setGeneratingReinforcement(false);
     }
-  }, [courseId, difficultyHint, generatingReinforcement, resetQuizState]);
+  }, [assessmentCourse, courseId, difficultyHint, generatingReinforcement, resetQuizState]);
 
   const handleGenerateFresh = useCallback(async () => {
     if (generatingFresh) return;
@@ -550,7 +557,7 @@ export function QuizView({
     try {
       const selectedNodeId = useWorkspaceStore.getState().selectedNodeId ?? undefined;
       if (!selectedNodeId) throw new Error("请先选择要练习的小节");
-      const previousIds = new Set((await listProblems(courseId, selectedNodeId)).map((item) => item.id));
+      const previousIds = new Set((await listProblems(courseId, listNodeId)).map((item) => item.id));
       const response = await extractQuiz(
         courseId,
         selectedNodeId,
@@ -559,7 +566,7 @@ export function QuizView({
         true,
       );
       const returnedIds = new Set(response.problem_ids ?? []);
-      const allProblems = await listProblems(courseId, selectedNodeId);
+      const allProblems = await listProblems(courseId, listNodeId);
       const freshProblems = allProblems.filter((item) =>
         returnedIds.size ? returnedIds.has(item.id) : !previousIds.has(item.id),
       ).filter(isUsableProblem);
@@ -574,9 +581,9 @@ export function QuizView({
     } finally {
       setGeneratingFresh(false);
     }
-  }, [courseId, difficultyHint, generatingFresh, modeHint, resetQuizState]);
+  }, [courseId, difficultyHint, generatingFresh, listNodeId, modeHint, resetQuizState]);
 
-  if (!selectedNodeId) {
+  if (!selectedNodeId && !assessmentCourse) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center p-8 text-center" data-testid="quiz-panel">
         <h3 className="mb-1 text-sm font-medium">{t("quiz.chooseChapterTitle")}</h3>
@@ -692,9 +699,9 @@ export function QuizView({
           ) : null}
         </div>
 
-        <p id="quiz-question-text" className="text-sm font-medium leading-relaxed" data-testid="quiz-question">
-          {problem.question}
-        </p>
+        <div id="quiz-question-text" data-testid="quiz-question">
+          <MarkdownRenderer content={problem.question} className="text-sm font-medium leading-relaxed [&_p]:my-0" />
+        </div>
 
         {problem.question_type === "coding" ? (
           <div className="space-y-2">

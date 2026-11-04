@@ -260,6 +260,13 @@ async def _upsert_course(
             changed = True
         return "updated" if changed else "unchanged"
 
+    from models.user import User
+    from services.course_creation_policy import ensure_course_creation_allowed
+    user = await db.get(User, user_id)
+    if user is None:
+        raise ValueError("Canvas import requires an existing user")
+    await ensure_course_creation_allowed(db, user)
+
     course = Course(
         user_id=user_id,
         name=name,

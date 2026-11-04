@@ -65,14 +65,16 @@ async def get_demo_course(
     Used by the setup flow's "Try with sample content" fast path.
     """
     result = await db.execute(
-        select(Course).where(Course.name == DEMO_COURSE_NAME)
+        select(Course).where(Course.name == DEMO_COURSE_NAME, Course.user_id == user.id)
     )
     course = result.scalar_one_or_none()
     if not course:
-        await seed_demo_course(db)
+        from services.course_creation_policy import ensure_course_creation_allowed
+        await ensure_course_creation_allowed(db, user)
+        await seed_demo_course(db, owner=user)
         await db.commit()
         result = await db.execute(
-            select(Course).where(Course.name == DEMO_COURSE_NAME)
+            select(Course).where(Course.name == DEMO_COURSE_NAME, Course.user_id == user.id)
         )
         course = result.scalar_one_or_none()
     if not course:

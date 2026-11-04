@@ -22,7 +22,7 @@ export default function ProfilePage() {
     () => ttlCache.get<HealthStatus>("course:health") ?? null,
   );
 
-  const { activeCourse, courses, fetchCourses, setActiveCourse } = useCourseStore();
+  const { activeCourse, courses, fetchCourses, fetchContentTree, setActiveCourse } = useCourseStore();
 
   useEffect(() => {
     if (courses.length === 0) void fetchCourses();
@@ -32,6 +32,10 @@ export default function ProfilePage() {
     const course = courses.find((c) => c.id === courseId);
     if (course) setActiveCourse(course);
   }, [courseId, courses, setActiveCourse]);
+
+  useEffect(() => {
+    if (courseId) void fetchContentTree(courseId);
+  }, [courseId, fetchContentTree]);
 
   useEffect(() => {
     getHealthStatus()

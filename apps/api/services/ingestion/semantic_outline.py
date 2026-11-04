@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from services.content_text import clean_course_title, has_unreadable_text
+from services.ingestion.document_structure import _is_structural_source_heading
 from services.llm.router import get_llm_client
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ def _parse_boundaries(raw: str, offset: int, count: int) -> list[tuple[int, str]
             continue
         start = item.get("start")
         title = clean_course_title(str(item.get("title") or ""), fallback="")
-        if isinstance(start, int) and 0 <= start < count and title and not has_unreadable_text(title):
+        if isinstance(start, int) and 0 <= start < count and title and not has_unreadable_text(title) and _is_structural_source_heading(title):
             result.append((offset + start, title[:80]))
     return result
 

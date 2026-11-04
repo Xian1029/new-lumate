@@ -25,6 +25,7 @@ from services.agent.background_runtime import track_background_task
 from services.auth.dependency import get_current_user
 from services.course_access import get_course_or_404
 from services.upload_storage import resolve_upload_path
+from services.presentation_preview import presentation_pdf_preview
 
 import socket  # noqa: F401 — re-exported for test monkeypatching compatibility
 
@@ -697,6 +698,30 @@ async def get_uploaded_file(
         filename=job.original_filename,
         content_disposition_type="inline",
     )
+
+
+@router.get("/files/{job_id}/presentation-preview", summary="Preview an Office file with its original layout")
+async def get_presentation_preview(
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    job = (await db.execute(select(IngestionJob).where(
+        IngestionJob.id == job_id,
+        IngestionJob.user_id == user.id,
+        IngestionJob.status == "completed",
+    ))).scalar_one_or_none()
+    if not job or not job.file_path:
+        raise NotFoundError("File")
+    if Path(job.original_filename or "").suffix.lower() not in {".ppt", ".pptx", ".doc", ".docx"}:
+        raise ValidationError("该文件不支持版式预览")
+    source = resolve_upload_path(job.file_path, settings.upload_dir)
+    if source is None:
+        raise NotFoundError("File on disk")
+    preview = await presentation_pdf_preview(source, settings.upload_dir, str(job.id))
+    if preview is None:
+        raise ValidationError("暂时无法保留原始版式，已提供文字精读视图")
+    return FileResponse(preview, media_type="application/pdf", filename=f"{source.stem}.pdf", content_disposition_type="inline")
 
 
 @router.get("/files/{job_id}/text", summary="Read extracted document text", description="Return the parsed text of an uploaded Office or text document for AI close reading.")

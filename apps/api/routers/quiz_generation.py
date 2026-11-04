@@ -61,6 +61,7 @@ def _quiz_source_for_node(node: CourseContentTree, note_by_node: dict[str, str])
         node.title,
         source,
         content_category=node.content_category,
+        source_file=node.source_file,
         # Explicit unit navigation may legitimately point at a legacy level-0
         # node. Its note/raw source has already passed the body-content checks.
     ):
@@ -270,7 +271,7 @@ async def extract_quiz(body: ExtractRequest, user: User = Depends(get_current_us
             eligible = [
                 n for n in nodes
                 if is_assessment_content(
-                    n.title, n.content, content_category=n.content_category, level=n.level,
+                    n.title, n.content, content_category=n.content_category, level=n.level, source_file=n.source_file,
                 )
                 and note_by_node.get(str(n.id))
             ][:max_nodes]

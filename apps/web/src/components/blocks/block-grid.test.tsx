@@ -56,7 +56,7 @@ describe("BlockGrid", () => {
     useCourseStore.setState({
       contentTreeCourseId: "test",
       contentTree: [{
-        id: "lesson-1", title: "1.1 正数和负数", type: "section", content: "有效学习内容", level: 2,
+        id: "lesson-1", title: "1.1 正数和负数", type: "section", content: "正数和负数可用于表示相反意义的量。".repeat(6), level: 2,
         order_index: 0, source_type: "pdf", children: [],
       }],
     });
@@ -108,6 +108,40 @@ describe("BlockGrid", () => {
   it("hides quiz until a specific practice-eligible lesson is selected", () => {
     mockSelectedNodeId = null;
     render(<BlockGrid courseId="test" aiActionsEnabled={false} />);
+    expect(screen.getByTestId("block-notes")).toBeInTheDocument();
+    expect(screen.queryByTestId("block-quiz")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("block-flashcards")).not.toBeInTheDocument();
+  });
+
+  it("shows course-wide practice for an assessment even before a section is selected", () => {
+    mockSelectedNodeId = null;
+    useCourseStore.setState({
+      contentTreeCourseId: "test",
+      contentTree: [{
+        id: "exam-root", title: "数学试卷", type: "document", content: null, level: 0,
+        order_index: 0, source_type: "file", content_category: "assessment",
+        children: [{
+          id: "exam-section", title: "一、选择题", type: "section",
+          content: "数轴和有理数的题干。".repeat(12), level: 1, order_index: 0,
+          source_type: "file", content_category: "assessment", children: [],
+        }],
+      }],
+    });
+    render(<BlockGrid courseId="test" aiActionsEnabled={true} />);
+    expect(screen.getByTestId("block-quiz")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+  });
+
+  it("shows reading notes but hides practice for a source-only report", () => {
+    useCourseStore.setState({
+      contentTreeCourseId: "test",
+      contentTree: [{
+        id: "lesson-1", title: "作品情况分析", type: "section",
+        content: "这份报告记录作品数据和账号表现。".repeat(8), level: 2,
+        order_index: 0, source_type: "file", source_file: "某公司作品情况分析.docx", children: [],
+      }],
+    });
+    render(<BlockGrid courseId="test" aiActionsEnabled={true} />);
     expect(screen.getByTestId("block-notes")).toBeInTheDocument();
     expect(screen.queryByTestId("block-quiz")).not.toBeInTheDocument();
     expect(screen.queryByTestId("block-flashcards")).not.toBeInTheDocument();

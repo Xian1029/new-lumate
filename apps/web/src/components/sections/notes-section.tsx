@@ -24,9 +24,10 @@ import {
 import { API_BASE, buildSecureRequestInit } from "@/lib/api/client";
 import { stabilizeMarkdownMermaidBlocks } from "@/lib/markdown/mermaid";
 import { takePdfStreamEvents } from "@/lib/pdf-reader/sse";
+import { parsePresentationSlides } from "@/lib/presentation-slides";
 import { useBatchManager } from "@/hooks/use-batch-manager";
 import { AiFeatureBlocked } from "@/components/shared/ai-feature-blocked";
-import { collectContentNodes, findFirstContentNode, findNodeById, isLearnableContentNode } from "@/lib/content-tree";
+import { findNodeById, isSourceOnlyContentNode, isStudyEligibleContentNode } from "@/lib/content-tree";
 import { ContentNodeItem } from "./notes/content-node-item";
 import { CornellNoteView } from "./notes/cornell-note-view";
 import { toast } from "sonner";
@@ -294,11 +295,12 @@ function PdfStudyReader({ url, courseId, jobId, initialPage = 1 }: { url: string
 }
 
 /** Read parsed Word, PowerPoint and text files without pretending they are PDFs. */
-function DocumentStudyReader({ courseId, jobId }: { courseId: string; jobId: string }) {
+function DocumentStudyReader({ courseId, jobId, filename }: { courseId: string; jobId: string; filename: string }) {
   const contentRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const cachedAnswersRef = useRef(new Map<string, string>());
   const [content, setContent] = useState("");
+  const [sourceFilename, setSourceFilename] = useState(filename);
   const [selected, setSelected] = useState("");
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
@@ -317,6 +319,7 @@ function DocumentStudyReader({ courseId, jobId }: { courseId: string; jobId: str
         const parsed = payload.content?.trim() ?? "";
         if (!parsed) throw new Error("empty");
         setContent(parsed);
+        setSourceFilename(payload.filename || filename);
         setStatus("原文已按解析结构显示。拖选文字即可精读。");
       })
       .catch((error: unknown) => {
@@ -328,7 +331,9 @@ function DocumentStudyReader({ courseId, jobId }: { courseId: string; jobId: str
       controller.abort();
       abortRef.current?.abort("close");
     };
-  }, [jobId]);
+  }, [jobId, filename]);
+
+  const slides = /\.pptx?$/i.test(sourceFilename) ? parsePresentationSlides(content) : [];
 
   const captureSelection = () => {
     const selection = window.getSelection();
@@ -426,7 +431,21 @@ function DocumentStudyReader({ courseId, jobId }: { courseId: string; jobId: str
   return <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-2 gap-3 p-3 md:grid-cols-[minmax(0,1fr)_24rem] md:grid-rows-1">
     <div className="overflow-auto rounded-xl border bg-white p-5 shadow-sm dark:bg-card sm:p-8">
       <p className="sticky top-0 z-10 mb-5 rounded-lg border bg-background/95 px-3 py-2 text-xs text-muted-foreground shadow-sm backdrop-blur">{status}</p>
-      {content ? <div ref={contentRef} onMouseUp={captureSelection} className="cursor-text select-text"><MarkdownRenderer content={content} className="mx-auto max-w-4xl text-[15px] leading-7" /></div> : null}
+      {content ? <div ref={contentRef} onMouseUp={captureSelection} className="cursor-text select-text">
+        {slides.length > 0 ? (
+          <div className="mx-auto max-w-4xl space-y-5">
+            {slides.map((slide) => (
+              <section key={slide.page} className="overflow-hidden rounded-2xl border border-border bg-background shadow-sm" aria-label={`第 ${slide.page} 页：${slide.title}`}>
+                <header className="flex items-start gap-3 border-b border-border bg-muted/40 px-5 py-4">
+                  <span className="shrink-0 rounded-lg bg-brand-muted px-2.5 py-1 text-xs font-semibold text-brand">第 {slide.page} 页</span>
+                  <h3 className="min-w-0 text-base font-semibold leading-7 text-foreground">{slide.title}</h3>
+                </header>
+                {slide.body ? <div className="px-5 py-4 sm:px-6"><MarkdownRenderer content={slide.body} className="text-[15px] leading-7" /></div> : null}
+              </section>
+            ))}
+          </div>
+        ) : <MarkdownRenderer content={content} className="mx-auto max-w-4xl text-[15px] leading-7" />}
+      </div> : null}
     </div>
     <aside className="overflow-auto rounded-2xl border bg-card p-4 shadow-sm">
       <div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-brand-muted text-brand"><Sparkles className="size-5" /></span><div><h2 className="text-lg font-bold">AI 精读</h2><p className="text-xs text-muted-foreground">回答仅依据当前文档选段</p></div></div>
@@ -439,6 +458,21 @@ function DocumentStudyReader({ courseId, jobId }: { courseId: string; jobId: str
       <div className="mt-4 min-w-0" aria-live="polite">{answer && <PdfAnswer answer={answer} sourceLabel={sourceLabel} />}</div>
     </aside>
   </div>;
+}
+
+function PresentationStudyReader({ courseId, jobId, filename, initialPage = 1 }: { courseId: string; jobId: string; filename: string; initialPage?: number }) {
+  const [previewAvailable, setPreviewAvailable] = useState<boolean | null>(null);
+  const previewUrl = `${API_BASE}/content/files/${jobId}/presentation-preview`;
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(previewUrl, buildSecureRequestInit({ signal: controller.signal }))
+      .then((response) => { if (!controller.signal.aborted) setPreviewAvailable(response.ok); })
+      .catch(() => { if (!controller.signal.aborted) setPreviewAvailable(false); });
+    return () => controller.abort();
+  }, [previewUrl]);
+  if (previewAvailable === null) return <NotesLoadingState label="正在准备文件原始版式…" />;
+  if (previewAvailable) return <PdfStudyReader url={previewUrl} courseId={courseId} jobId={jobId} initialPage={initialPage} />;
+  return <DocumentStudyReader courseId={courseId} jobId={jobId} filename={filename} />;
 }
 
 interface NotesSectionProps {
@@ -607,21 +641,44 @@ export function NotesSection({
   const aiFetchRequestRef = useRef(0);
   const generateRequestRef = useRef(0);
 
-  const contentNodes = useMemo(() => collectContentNodes(contentTree), [contentTree]);
+  const contentNodes = useMemo(() => {
+    const collect = (nodes: typeof contentTree): typeof contentTree => nodes.flatMap((node) => [
+      ...(node.content?.trim() ? [node] : []), ...collect(node.children ?? []),
+    ]);
+    return collect(contentTree);
+  }, [contentTree]);
+  const sectionLabels = useMemo(() => {
+    const labels = new Map<string, string>();
+    const counts = new Map<string, number>();
+    for (const node of contentNodes) counts.set(node.title, (counts.get(node.title) ?? 0) + 1);
+    const walk = (nodes: typeof contentTree, ancestors: string[]) => {
+      for (const node of nodes) {
+        const title = node.title || "未命名内容";
+        if (node.content?.trim()) {
+          const section = [...ancestors].reverse().find((name) => /^(?:试题|参考答案|答案|解析)/.test(name));
+          labels.set(node.id, (counts.get(node.title) ?? 0) > 1 && section ? `${section} · ${title}` : title);
+        }
+        walk(node.children ?? [], [...ancestors, title]);
+      }
+    };
+    walk(contentTree, []);
+    return labels;
+  }, [contentNodes, contentTree]);
 
   const selectedNode = useMemo(
     () => findNodeById(contentTree, selectedNodeId),
     [selectedNodeId, contentTree],
   );
-  const selectedLearnableNode = selectedNode && isLearnableContentNode(selectedNode)
+  const selectedDisplayNode = selectedNode?.content?.trim() ? selectedNode : contentNodes[0] ?? null;
+  const selectedLearnableNode = selectedNode && isStudyEligibleContentNode(selectedNode)
     ? selectedNode
     : null;
   const canUseAiNotes = !!selectedLearnableNode;
   const selectedNodeForFetch = selectedLearnableNode?.id;
 
   const currentIndex = useMemo(
-    () => contentNodes.findIndex((n) => n.id === selectedLearnableNode?.id),
-    [contentNodes, selectedLearnableNode?.id],
+    () => contentNodes.findIndex((n) => n.id === selectedDisplayNode?.id),
+    [contentNodes, selectedDisplayNode?.id],
   );
   const canPrev = currentIndex > 0;
   const canNext = currentIndex >= 0 && currentIndex < contentNodes.length - 1;
@@ -640,7 +697,7 @@ export function NotesSection({
     // Do not clear it while loading, and never validate it against another
     // course's tree left in the shared store.
     if (contentTreeCourseId !== courseId) return;
-    if (!findFirstContentNode(contentTree)) {
+    if (contentNodes.length === 0) {
       if (selectedNodeId) setSelectedNodeId(null);
       if (draft) setDraft(null);
       return;
@@ -650,10 +707,13 @@ export function NotesSection({
     if (selectedNodeId && !requested) {
       setSelectedNodeId(null);
     }
+    if (!selectedNodeId && contentNodes.length === 1 && isStudyEligibleContentNode(contentNodes[0])) {
+      setSelectedNodeId(contentNodes[0].id);
+    }
     if (draft && draft.sourceNodeId !== (selectedLearnableNode?.id ?? "")) {
       setDraft(null);
     }
-  }, [courseId, contentTreeCourseId, contentTree, selectedNodeId, setSelectedNodeId, draft, selectedLearnableNode?.id]);
+  }, [courseId, contentTreeCourseId, contentTree, contentNodes.length, selectedNodeId, setSelectedNodeId, draft, selectedLearnableNode?.id]);
 
   useEffect(() => {
     setViewMode(canUseAiNotes ? "ai" : "source");
@@ -786,7 +846,7 @@ export function NotesSection({
     return <NotesLoadingState label={t("ui.loading")} />;
   }
 
-  if (contentTree.length === 0) {
+  if (contentTree.length === 0 && !sourceFilesLoading && sourceFiles.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center p-4 text-center">
         <div>
@@ -803,7 +863,7 @@ export function NotesSection({
         <div
           role="toolbar"
           aria-label={t("ui.notes_toolbar")}
-          className="sticky top-0 z-30 flex min-h-11 shrink-0 items-center gap-2 border-b border-border/60 bg-card px-3 py-2 shadow-[0_8px_18px_-16px_rgba(30,45,38,0.7)]"
+          className="sticky top-0 z-30 flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b border-border/60 bg-card px-3 py-2 shadow-[0_8px_18px_-16px_rgba(30,45,38,0.7)]"
         >
           {/* AI / Source toggle */}
           <div role="group" aria-label={t("ui.view_mode")} className="flex items-center gap-0.5 rounded-xl bg-muted/30 p-0.5">
@@ -836,9 +896,9 @@ export function NotesSection({
             </button>
           </div>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
             {/* Node selector: prev / dropdown / next */}
-            {contentNodes.length > 0 && (!selectedLearnableNode || contentNodes.length > 1) && (
+            {contentNodes.length > 0 && (!selectedDisplayNode || contentNodes.length > 1) && (
               <>
                 <button
                   type="button"
@@ -850,9 +910,9 @@ export function NotesSection({
                   &lsaquo;
                 </button>
                 <select
-                  value={selectedLearnableNode?.id ?? ""}
+                  value={selectedDisplayNode?.id ?? ""}
                   onChange={(e) => setSelectedNodeId(e.target.value)}
-                  className="h-6 text-xs rounded border border-border bg-background px-1 max-w-[160px] truncate"
+                  className="h-8 min-w-36 max-w-[min(65vw,240px)] flex-1 rounded-lg border border-border bg-background px-2 text-xs"
                   aria-label={t("ui.select_section")}
                 >
                   <option value="" disabled>
@@ -860,7 +920,7 @@ export function NotesSection({
                   </option>
                   {contentNodes.map((n, i) => (
                     <option key={n.id} value={n.id}>
-                      {n.title || `${t("ui.untitled_section")} ${i + 1}`}
+                      {sectionLabels.get(n.id) || `${t("ui.untitled_section")} ${i + 1}`}
                     </option>
                   ))}
                 </select>
@@ -875,9 +935,9 @@ export function NotesSection({
                 </button>
               </>
             )}
-            {contentNodes.length <= 1 && selectedLearnableNode ? (
+            {contentNodes.length <= 1 && selectedDisplayNode ? (
               <Badge variant="outline" className="max-w-56 truncate">
-                {selectedLearnableNode.title}
+                {selectedDisplayNode.title}
               </Badge>
             ) : null}
             {draft && latestBatch?.is_active ? (
@@ -921,7 +981,7 @@ export function NotesSection({
             ? "xl:[&_[data-slot=scroll-area-scrollbar]]:hidden xl:[&_[data-slot=scroll-area-viewport]]:!overflow-hidden"
             : ""
         }`}>
-          {!selectedLearnableNode ? (
+          {!selectedLearnableNode && viewMode !== "source" ? (
             <div className="mx-auto flex max-w-md flex-col items-center justify-center rounded-2xl border border-dashed border-brand/30 bg-brand-muted/20 px-6 py-12 text-center">
               <BookOpen className="mb-3 size-8 text-brand" aria-hidden="true" />
               <p className="text-base font-semibold text-foreground">先选择一个学习内容</p>
@@ -959,7 +1019,7 @@ export function NotesSection({
             </>
           ) : sourceFilesLoading ? (
             <NotesLoadingState label={t("notes.preparingSource")} />
-          ) : sourceFiles.length > 0 && (!selectedNode || selectedNode.source_type === "file") ? (
+          ) : sourceFiles.length > 0 && (!selectedDisplayNode || selectedDisplayNode.source_type === "file") ? (
             <div className="mx-auto max-w-3xl overflow-hidden rounded-3xl border border-amber-200/80 bg-gradient-to-br from-amber-50 via-orange-50/70 to-emerald-50/70 shadow-[0_18px_50px_-35px_rgba(120,80,20,0.55)] dark:border-amber-900 dark:from-amber-950/30 dark:via-background dark:to-emerald-950/20">
               <div className="relative border-b border-amber-200/60 px-6 py-5 dark:border-amber-900/70">
                 <div className="pointer-events-none absolute -right-8 -top-12 size-32 rounded-full bg-amber-200/35 blur-2xl" />
@@ -984,9 +1044,9 @@ export function NotesSection({
                     type="button"
                     key={file.id}
                     onClick={() => {
-                      const isSelectedPdf = selectedLearnableNode?.source_file?.toLowerCase().endsWith(".pdf")
+                      const isSelectedPdf = (selectedLearnableNode?.source_file?.toLowerCase().endsWith(".pdf") || selectedLearnableNode?.content_category === "assessment")
                         && selectedLearnableNode.source_file === (file.filename || file.file_name);
-                      const page = isSelectedPdf ? selectedLearnableNode.metadata?.source_pages?.[0] : undefined;
+                      const page = isSelectedPdf ? selectedLearnableNode?.metadata?.source_pages?.[0] : undefined;
                       setSourcePreview({
                         url: `${API_BASE}/content/files/${file.job_id}${page ? `#page=${page}` : ""}`,
                         jobId: file.job_id,
@@ -1016,8 +1076,25 @@ export function NotesSection({
             </div>
           ) : (
             // Plain-text and web sources remain readable as extracted text.
-            selectedNode ? (
-              <ContentNodeItem node={selectedNode} />
+            selectedDisplayNode ? (
+              <div className="mx-auto max-w-4xl">
+                {isSourceOnlyContentNode(selectedDisplayNode) && sourceFiles.length > 0 ? (
+                  <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+                    <p className="text-sm text-emerald-900">这份资料适合原文精读。选择文段后可向 AI 提问。</p>
+                    <Button size="sm" onClick={() => {
+                      const file = sourceFiles.find((item) => (item.filename || item.file_name) === selectedDisplayNode.source_file) ?? sourceFiles[0];
+                      setSourcePreview({
+                        url: `${API_BASE}/content/files/${file.job_id}`,
+                        jobId: file.job_id,
+                        name: file.filename || file.file_name || t("notes.originalPdf"),
+                        kind: (file.filename || file.file_name || "").toLowerCase().endsWith(".pdf") ? "pdf" : "document",
+                        page: selectedDisplayNode.metadata?.source_pages?.[0] ?? 1,
+                      });
+                    }}>打开原文精读</Button>
+                  </div>
+                ) : null}
+                {selectedNode ? <ContentNodeItem node={selectedNode} /> : contentTree.map((node) => <ContentNodeItem key={node.id} node={node} />)}
+              </div>
             ) : (
               contentTree.map((node) => (
                 <ContentNodeItem key={node.id} node={node} />
@@ -1045,7 +1122,9 @@ export function NotesSection({
           courseId={courseId}
           jobId={sourcePreview.jobId}
           initialPage={sourcePreview.page ?? 1}
-        /> : <DocumentStudyReader courseId={courseId} jobId={sourcePreview.jobId} />}
+        /> : /\.(?:pptx?|docx?)$/i.test(sourcePreview.name)
+          ? <PresentationStudyReader courseId={courseId} jobId={sourcePreview.jobId} filename={sourcePreview.name} initialPage={sourcePreview.page ?? 1} />
+          : <DocumentStudyReader courseId={courseId} jobId={sourcePreview.jobId} filename={sourcePreview.name} />}
       </div>,
       document.body,
     ) : null}

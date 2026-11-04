@@ -2,7 +2,7 @@
 
 import { t } from "@/lib/i18n";
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCourseStore } from "@/store/course";
 import { WorkspaceHeader } from "@/components/shell/workspace-header";
 import { ChatFab } from "@/components/chat/chat-fab";
@@ -10,10 +10,11 @@ import { ChatDrawer } from "@/components/chat/chat-drawer";
 import { getHealthStatus, type HealthStatus } from "@/lib/api";
 import { ttlCache } from "@/lib/cache";
 import { GraphView } from "@/components/sections/analytics/graph-view";
-import { buildFocusTerms, findNodeById, getContentNodeMaterialKey } from "@/lib/content-tree";
+import { buildFocusTerms, findNodeById, getContentNodeMaterialKey, hasStudyContent } from "@/lib/content-tree";
 
 export default function GraphPage() {
   const params = useParams();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const courseId = params.id as string;
   const [chatOpen, setChatOpen] = useState(false);
@@ -53,6 +54,13 @@ export default function GraphPage() {
   );
   const focusTerms = selectedNode ? buildFocusTerms(selectedNode) : undefined;
   const activeMaterialId = getContentNodeMaterialKey(contentTree, selectedNodeId);
+  const sourceOnly = contentTreeCourseId === courseId && !hasStudyContent(contentTree);
+
+  useEffect(() => {
+    if (sourceOnly) router.replace(`/course/${courseId}/notes`);
+  }, [sourceOnly, router, courseId]);
+
+  if (sourceOnly) return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">正在打开资料原文…</div>;
 
   return (
     <div className="min-h-screen bg-background flex flex-col">

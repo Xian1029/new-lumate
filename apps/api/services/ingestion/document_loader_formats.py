@@ -501,6 +501,20 @@ def _extract_docx_fallback(file_path: str) -> tuple[str, str]:
         doc = Document(file_path)
         parts: list[str] = []
 
+        def paragraph_text_with_media(paragraph: Paragraph) -> str:
+            fragments: list[str] = []
+            for run in paragraph.runs:
+                fragments.append(run.text)
+                embedded = len(run._element.xpath('.//w:drawing')) + len(run._element.xpath('.//w:pict')) + len(run._element.xpath('.//w:object'))
+                if embedded:
+                    fragments.append(' [pic]' * embedded)
+            # OfficeMath may be a direct child of the paragraph, outside all
+            # text runs. Never silently discard a missing maths expression.
+            math_count = len(paragraph._p.xpath('.//m:oMath'))
+            if math_count:
+                fragments.append(' [pic]' * math_count)
+            return ''.join(fragments).strip()
+
         # Preserve Word heading styles as Markdown headings.  Without this,
         # DOCX files lose their semantic structure and the downstream tree
         # builder sees one long wall of text.  Body paragraphs remain plain
@@ -508,7 +522,7 @@ def _extract_docx_fallback(file_path: str) -> tuple[str, str]:
         for block in doc.element.body.iterchildren():
             if block.tag == qn("w:p"):
                 para = Paragraph(block, doc)
-                text = para.text.strip()
+                text = paragraph_text_with_media(para)
                 if not text:
                     continue
                 style_name = str(getattr(getattr(para, "style", None), "name", "") or "")
@@ -522,7 +536,7 @@ def _extract_docx_fallback(file_path: str) -> tuple[str, str]:
             elif block.tag == qn("w:tbl"):
                 table = Table(block, doc)
                 md_table = _table_to_markdown(
-                    [[cell.text.strip() for cell in row.cells] for row in table.rows]
+                    [["\n".join(paragraph_text_with_media(paragraph) for paragraph in cell.paragraphs).strip() for cell in row.cells] for row in table.rows]
                 )
                 if md_table:
                     parts.append(md_table)

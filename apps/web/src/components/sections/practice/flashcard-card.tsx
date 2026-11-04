@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import { Button } from "@/components/ui/button";
+import { MarkdownRenderer } from "@/components/shared/markdown-renderer";
 import { useSwipeGesture } from "./use-swipe-gesture";
 import type { Flashcard, LectorFlashcard } from "@/lib/api";
 
@@ -67,12 +68,12 @@ export function FlashcardCard({
         >
           <div className="flashcard-face absolute inset-0 flex flex-col items-center justify-center rounded-2xl card-shadow bg-card p-6 text-center">
             <p className="text-xs text-muted-foreground mb-2">{t("flashcard.questionLabel")}</p>
-            <p className="text-sm font-medium whitespace-pre-wrap">{card.front}</p>
+            <MarkdownRenderer content={card.front} className="text-sm font-medium whitespace-pre-wrap [&_p]:my-0" />
           </div>
 
           <div className="flashcard-back absolute inset-0 flex flex-col items-center justify-center rounded-2xl card-shadow bg-card p-6 text-center">
             <p className="text-xs text-muted-foreground mb-2">{t("flashcard.answerLabel")}</p>
-            <p className="text-sm font-medium whitespace-pre-wrap">{card.back}</p>
+            <MarkdownRenderer content={card.back} className="text-sm font-medium whitespace-pre-wrap [&_p]:my-0" />
           </div>
         </div>
       </div>

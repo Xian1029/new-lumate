@@ -1,6 +1,6 @@
 "use client";
 
-export type CurrentUser = { id: string; username: string | null; name: string; role: string; must_change_password: boolean };
+export type CurrentUser = { id: string; username: string | null; name: string; role: string; must_change_password: boolean; can_create_courses: boolean; max_courses: number | null };
 
 export class AccountError extends Error {
   constructor(message: string, public status: number, public code?: string) {

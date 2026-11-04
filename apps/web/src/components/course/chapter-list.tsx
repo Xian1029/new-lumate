@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { FileText, FolderOpen, ChevronRight } from "lucide-react";
 import type { ContentNode } from "@/lib/api";
+import { isSourceOnlyContentNode } from "@/lib/content-tree";
 import { useT, useTF } from "@/lib/i18n-context";
 
 interface ChapterListProps {
@@ -66,7 +67,7 @@ export function ChapterList({ courseId, nodes }: ChapterListProps) {
               {...(isFolder ? { "aria-expanded": true } : {})}
             >
               <Link
-                href={`/course/${courseId}/unit/${node.id}`}
+                href={isSourceOnlyContentNode(node) ? `/course/${courseId}/notes?node=${encodeURIComponent(node.id)}` : `/course/${courseId}/unit/${node.id}`}
                 className="group flex items-center gap-4 p-4 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors"
               >
                 <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-muted/50 shrink-0">

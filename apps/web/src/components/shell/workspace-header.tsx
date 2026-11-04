@@ -11,6 +11,7 @@ import { useT } from "@/lib/i18n-context";
 import { syncCourse } from "@/lib/api";
 import { useCourseStore } from "@/store/course";
 import { useWorkspaceStore } from "@/store/workspace";
+import { hasStudyContent } from "@/lib/content-tree";
 
 
 interface WorkspaceHeaderProps {
@@ -35,6 +36,9 @@ export function WorkspaceHeader({
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const fetchContentTree = useCourseStore((s) => s.fetchContentTree);
+  const contentTree = useCourseStore((s) => s.contentTree);
+  const contentTreeCourseId = useCourseStore((s) => s.contentTreeCourseId);
+  const showGraph = !!courseId && contentTreeCourseId === courseId && hasStudyContent(contentTree);
   const fetchIngestionJobs = useCourseStore((s) => s.fetchIngestionJobs);
   const cognitiveState = useWorkspaceStore((s) => s.cognitiveState);
   const courseRoot = courseId ? `/course/${courseId}` : null;
@@ -161,14 +165,14 @@ export function WorkspaceHeader({
             >
               <BookOpen className="size-4" />
             </Link>
-            <Link
+            {showGraph ? <Link
               href={`/course/${courseId}/graph`}
               className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               title={t("ui.knowledge_graph_1")}
               aria-label={t("ui.knowledge_graph_1")}
             >
               <GitBranch className="size-4" />
-            </Link>
+            </Link> : null}
             <Link
               href={`/course/${courseId}/profile`}
               className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"

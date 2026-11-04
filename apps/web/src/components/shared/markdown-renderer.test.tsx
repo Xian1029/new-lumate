@@ -3,6 +3,13 @@ import { render, screen } from "@/test-utils";
 import { MarkdownRenderer, normalizeMarkdownEmphasis } from "./markdown-renderer";
 
 describe("MarkdownRenderer", () => {
+  it("renders generated fraction markup as a formula instead of raw TeX", () => {
+    const { container } = render(
+      <MarkdownRenderer content={"解方程 $\\dfrac{x}{3}+2=5$，请写出完整步骤。"} />,
+    );
+    expect(container.querySelector(".katex")).toBeInTheDocument();
+    expect(container.querySelector(".katex-html")?.textContent).toContain("x");
+  });
   it("repairs generated bold text with whitespace before the closing marker", () => {
     expect(normalizeMarkdownEmphasis("- [ ] **先看懂： **打开学习笔记")).toBe(
       "- [ ] **先看懂：** 打开学习笔记",

@@ -12,7 +12,7 @@ from database import get_db
 from models.user import User
 from schemas.auth import ChangePasswordRequest, LoginRequest, RegisterRequest, UserResponse
 from services.auth.dependency import get_current_user, require_super_admin
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uuid
 from services.auth.password import hash_password, verify_password
 
@@ -20,11 +20,17 @@ router = APIRouter()
 
 
 class AdminAccountRequest(RegisterRequest):
-    pass
+    can_create_courses: bool = True
+    max_courses: int | None = Field(default=None, ge=0, le=10000)
 
 
 class AdminAccountStatus(BaseModel):
     is_active: bool
+
+
+class AdminCoursePolicy(BaseModel):
+    can_create_courses: bool
+    max_courses: int | None = Field(default=None, ge=0, le=10000)
 
 
 class AdminPasswordReset(BaseModel):
@@ -33,8 +39,12 @@ class AdminPasswordReset(BaseModel):
 
 @router.get("/admin/users")
 async def list_users(_: User = Depends(require_super_admin), db: AsyncSession = Depends(get_db)):
+    from models.course import Course
     users = (await db.execute(select(User).where(User.role == "student").order_by(User.created_at.desc()))).scalars().all()
-    return [{**_user_response(user).model_dump(), "is_active": user.is_active} for user in users]
+    counts = dict((await db.execute(
+        select(Course.user_id, func.count()).where(Course.status != "TRASHED").group_by(Course.user_id)
+    )).all())
+    return [{**_user_response(user).model_dump(), "is_active": user.is_active, "current_courses": counts.get(user.id, 0)} for user in users]
 
 
 @router.post("/admin/users", status_code=201)
@@ -42,7 +52,7 @@ async def create_user(body: AdminAccountRequest, _: User = Depends(require_super
     username = body.username.strip().lower()
     if username == "admin" or (await db.execute(select(User).where(User.username == username))).scalar_one_or_none():
         raise HTTPException(status_code=409, detail="用户名不可用")
-    user = User(username=username, name=(body.name or username), role="student", hashed_password=hash_password(body.password))
+    user = User(username=username, name=(body.name or username), role="student", hashed_password=hash_password(body.password), can_create_courses=body.can_create_courses, max_courses=body.max_courses)
     db.add(user)
     await db.commit()
     await db.refresh(user)
@@ -63,6 +73,15 @@ async def change_user_status(user_id: uuid.UUID, body: AdminAccountStatus, _: Us
     if not user.is_active:
         from models.user import UserSession
         await db.execute(UserSession.__table__.delete().where(UserSession.user_id == user.id))
+    await db.commit()
+    return {**_user_response(user).model_dump(), "is_active": user.is_active}
+
+
+@router.patch("/admin/users/{user_id}/course-policy")
+async def change_user_course_policy(user_id: uuid.UUID, body: AdminCoursePolicy, _: User = Depends(require_super_admin), db: AsyncSession = Depends(get_db)):
+    user = await _managed_student(db, user_id)
+    user.can_create_courses = body.can_create_courses
+    user.max_courses = body.max_courses
     await db.commit()
     return {**_user_response(user).model_dump(), "is_active": user.is_active}
 
@@ -99,6 +118,8 @@ def _user_response(user: User) -> UserResponse:
         id=str(user.id), email=user.email, name=user.name,
         username=user.username, role=user.role,
         must_change_password=user.must_change_password,
+        can_create_courses=user.can_create_courses,
+        max_courses=user.max_courses,
     )
 
 

@@ -161,7 +161,7 @@ export default function ProcessingCenterPage() {
                 <p className="truncate text-sm font-medium text-foreground">{job.filename || "(未命名)"}</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {statusText(job)}
-                  {job.category ? ` · ${job.category === "textbook" ? "教材" : job.category === "assignment" ? "作业" : job.category === "notes" ? "笔记" : job.category === "lecture_slides" ? "课件" : job.category === "exam_schedule" ? "考试安排" : job.category === "syllabus" ? "教学大纲" : "其他"}` : ""}
+                  {job.category ? ` · ${job.category === "textbook" ? "教材" : job.category === "assessment" ? "试题资料" : job.category === "assignment" ? "作业" : job.category === "notes" ? "笔记" : job.category === "lecture_slides" ? "课件" : job.category === "exam_schedule" ? "考试安排" : job.category === "syllabus" ? "教学大纲" : "其他"}` : ""}
                   {job.nodes_created > 0 ? ` · 生成 ${job.nodes_created} 个内容节点` : ""}
                 </p>
                 {!["completed", "failed", "embedding"].includes(job.status) && (

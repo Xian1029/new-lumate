@@ -132,12 +132,17 @@ def is_assessment_content(
     *,
     content_category: str | None = None,
     level: int | None = None,
+    source_file: str | None = None,
 ) -> bool:
     """Whether a tree node is suitable material for questions and flashcards."""
     if not content or len(content.strip()) < 80:
         return False
-    if content_category in {"syllabus", "assignment", "exam_schedule", "other", "reference"}:
+    if content_category in {"syllabus", "assignment", "exam_schedule", "reference"}:
         return False
+    if source_file:
+        from services.ingestion.document_structure import is_reference_only_document
+        if is_reference_only_document(source_file, content):
+            return False
     if not is_body_content(title, content):
         return False
     heading = clean_course_title(title, fallback="")

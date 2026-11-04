@@ -19,8 +19,9 @@ WORKDIR /app
 
 # Runtime-only system deps (curl for healthcheck, docker CLI for sandbox,
 # gosu to drop privileges after preparing mounted data volumes)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl docker.io gosu antiword catdoc tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim \
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    curl docker.io gosu antiword catdoc tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim libreoffice-impress libreoffice-writer poppler-utils fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed Python packages from builder

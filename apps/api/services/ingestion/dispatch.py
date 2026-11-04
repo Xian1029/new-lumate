@@ -46,7 +46,7 @@ async def dispatch_content(
         or job.source_type == "url"
     )
 
-    if category in ("lecture_slides", "textbook", "notes", "syllabus", "assignment", "exam_schedule") or (
+    if category in ("lecture_slides", "textbook", "notes", "syllabus", "assignment", "exam_schedule", "assessment", "reference") or (
         category == "other" and inferred_text_source
     ):
         # Build content tree using PageIndex pattern
@@ -120,6 +120,21 @@ async def dispatch_content(
             )
         from services.parser.pdf import ensure_tree_parentage
         nodes = ensure_tree_parentage(nodes)
+        if category == "assessment" and job.file_path:
+            from config import settings
+            from services.upload_storage import resolve_upload_path
+            from services.ingestion.assessment_source_pages import annotate_assessment_source_pages
+            source = resolve_upload_path(job.file_path, settings.upload_dir)
+            if source:
+                if source.suffix.lower() == ".pdf":
+                    preview = source
+                elif source.suffix.lower() in {".doc", ".docx", ".ppt", ".pptx"}:
+                    from services.presentation_preview import presentation_pdf_preview
+                    preview = await presentation_pdf_preview(source, settings.upload_dir, str(job.id))
+                else:
+                    preview = None
+                if preview:
+                    await asyncio.to_thread(annotate_assessment_source_pages, nodes, preview)
         outline_report = (job.page_stats or {}).get("outline_integrity", {})
         structure_source = "SOURCE_TOC" if outline_report.get("checked") else "GENERATED_FROM_CONTENT"
         # SQLite otherwise checks self-referential FKs at each statement,
@@ -191,8 +206,9 @@ async def dispatch_content(
         # Preserve the existing course tree as the learning-space source of
         # truth, then mirror it into the textbook-first catalog for question
         # provenance and cross-chapter retrieval.
-        from services.question_catalog import ensure_textbook_catalog
-        await ensure_textbook_catalog(db, course_id=job.course_id, nodes=nodes)
+        if category != "reference":
+            from services.question_catalog import ensure_textbook_catalog
+            await ensure_textbook_catalog(db, course_id=job.course_id, nodes=nodes)
 
         result["content_tree"] = len(nodes)
 

@@ -240,6 +240,7 @@ async def restructure_notes(
     visual_preference: str = "auto",
     *,
     allow_fallback: bool = True,
+    assessment_mode: bool = False,
 ) -> str:
     """Restructure content based on user preference format.
 
@@ -268,6 +269,18 @@ Important:
 - Include Mermaid diagrams and KaTeX formulas where they add value
 - Keep Mermaid labels simple and diagram-safe; move detailed examples into bullets below the diagram
 - Do NOT add information not present in the original content"""
+
+    if assessment_mode:
+        system_prompt += """
+
+This source is a question paper. Write a concept-focused study note based on the
+readable question stems and supplied explanations, not a list of question types.
+Group related tested concepts and explain the general principles and methods.
+Never infer a missing equation, diagram, option, answer, or numerical result
+from an image placeholder. Never claim an unverified answer is correct.
+If a concept cannot be identified from readable text, omit it. Do not include
+the raw questions as exercises; later quizzes and cards must test the concepts
+with new, self-contained questions."""
 
     source_requires_chinese = is_primary_chinese(f"{title}\n{content}")
     if source_requires_chinese:

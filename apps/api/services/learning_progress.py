@@ -17,10 +17,11 @@ from models.content import CourseContentTree, INFO_CATEGORIES
 from models.ingestion import StudySession
 from models.progress import LearningProgress
 from services.content_text import is_body_content
+from services.ingestion.document_structure import is_reference_only_document
 
 
 # These categories are document structure / logistics, never a student lesson.
-NON_LEARNING_CATEGORIES = INFO_CATEGORIES | {"reference", "other"}
+NON_LEARNING_CATEGORIES = INFO_CATEGORIES | {"reference"}
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ def learnable_leaf_nodes(nodes: Iterable[CourseContentTree]) -> list[CourseConte
             node for node in node_list
             if node.id not in parent_ids
             and (node.content_category or "").lower() not in NON_LEARNING_CATEGORIES
+            and not is_reference_only_document(node.source_file or "", node.content or "")
             # Some legacy parsed trees store body text in generated blocks and
             # leave ``content`` empty.  Use a harmless body sentinel for the
             # title/front-matter check so we do not erase their real lessons.

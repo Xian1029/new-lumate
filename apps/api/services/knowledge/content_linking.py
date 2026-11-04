@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from models.content import CourseContentTree
 
 
-_NON_LEARNING_CATEGORIES = {"reference", "syllabus", "assignment", "exam_schedule", "other"}
+_NON_LEARNING_CATEGORIES = {"reference", "syllabus", "assignment", "exam_schedule"}
 _NON_LEARNING_TITLE = re.compile(
     r"前言|目录|版权|出版社|编者|主编|出版说明|封面|附录|参考文献|官方来源|致谢"
 )
@@ -57,6 +57,9 @@ def is_learnable_curriculum_node(node: CourseContentTree) -> bool:
     if (node.content_category or "") in _NON_LEARNING_CATEGORIES:
         return False
     if _NON_LEARNING_TITLE.search(node.title or ""):
+        return False
+    from services.ingestion.document_structure import is_reference_only_document
+    if is_reference_only_document(node.source_file or "", node.content or ""):
         return False
     return (node.level or 0) > 0 and bool((node.content or "").strip())
 

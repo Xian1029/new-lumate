@@ -37,5 +37,7 @@ class UserResponse(BaseModel):
     username: str | None = None
     role: str = "student"
     must_change_password: bool = False
+    can_create_courses: bool = True
+    max_courses: int | None = None
 
     model_config = {"from_attributes": True}

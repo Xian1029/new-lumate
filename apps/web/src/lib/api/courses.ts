@@ -177,7 +177,7 @@ export interface ContentNode {
   order_index: number;
   source_type: string;
   source_file?: string | null;
-  content_category?: "lecture_slides" | "textbook" | "notes" | "syllabus" | "assignment" | "exam_schedule" | "reference" | "other" | null;
+  content_category?: "lecture_slides" | "textbook" | "notes" | "syllabus" | "assignment" | "assessment" | "exam_schedule" | "reference" | "other" | null;
   metadata?: { source_pages?: number[] } | null;
   children: ContentNode[];
   file_type?: string;

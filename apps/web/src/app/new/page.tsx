@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { getCourseCreationPolicy } from "@/lib/course-creation-policy";
+
 import { useNewProject } from "./use-new-project";
 import { ContentUploadStep } from "./content-upload-step";
 import { ParsingProgressStep } from "./parsing-progress-step";
@@ -10,6 +13,16 @@ import { ParsingProgressStep } from "./parsing-progress-step";
  */
 export default function NewProjectPage() {
   const p = useNewProject();
+  const [creationAccess, setCreationAccess] = useState<"checking" | "allowed" | "denied">("checking");
+  useEffect(() => {
+    let active = true;
+    void getCourseCreationPolicy().then((policy) => {
+      if (active) setCreationAccess(policy.can_create_now ? "allowed" : "denied");
+    }).catch(() => { if (active) setCreationAccess("denied"); });
+    return () => { active = false; };
+  }, []);
+
+  if (creationAccess !== "allowed") return <main className="grid min-h-screen place-items-center bg-background p-6 text-center text-sm text-muted-foreground"><div><p>{creationAccess === "checking" ? "正在检查学习空间权限…" : "当前账号无法新建学习空间，或已达到管理员设置的上限。"}</p><button type="button" onClick={() => p.router.push("/")} className="mt-4 rounded-lg bg-brand px-4 py-2 text-brand-foreground">返回首页</button></div></main>;
 
   return (
     <div className="min-h-screen bg-background">

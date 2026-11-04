@@ -9,6 +9,37 @@ const NON_LEARNING_CATEGORIES = new Set(["reference", "syllabus", "assignment", 
 // foreword or table of contents.  It is source material, not a lesson: it
 // must never unlock practice, alter progress, or become a recommendation.
 const NON_LEARNING_TITLES = /^(?:前言与目录|目\s*录|contents?|前\s*言|序(?:言)?|引\s*言|致读者|使用说明|编写说明|出版说明|版权页|附录|参考文献|索引|preface|foreword|introduction)$/i;
+const BUSINESS_REPORT_NAME = /(?:公司|企业|账号|作品情况|运营|财务|市场|商业|投融资|客户).{0,20}(?:分析|报告|汇总|概览|调研)|(?:分析|报告).{0,20}(?:公司|企业|账号|作品)/;
+const OPERATIONS_DOCUMENT_NAME = /(?:合同|发票|收据|报价单|采购单|会议纪要|简历|行政通知|财务报表|运营周报|工作总结)/;
+const STUDY_NAME = /(?:教材|教科书|课本|讲义|知识点|课程|学习|试卷|习题|练习|题库|教案)/;
+
+export function isSourceOnlyContentNode(node: ContentNode): boolean {
+  const source = node.source_file ?? "";
+  return node.content_category === "reference" ||
+    ((BUSINESS_REPORT_NAME.test(source) || OPERATIONS_DOCUMENT_NAME.test(source)) && !STUDY_NAME.test(source));
+}
+
+export function isStudyEligibleContentNode(node: ContentNode): boolean {
+  return isLearnableContentNode(node) && !isSourceOnlyContentNode(node)
+    && node.level > 0 && (node.content_category === "assessment"
+      ? Boolean(node.content?.trim())
+      : (node.content?.trim().length ?? 0) >= 80);
+}
+
+export function hasStudyContent(nodes: ContentNode[]): boolean {
+  return nodes.some((node) => isStudyEligibleContentNode(node) || hasStudyContent(node.children ?? []));
+}
+
+/** A question paper's sections are answer-format groups, not separate lessons. */
+export function isAssessmentOnlyCourse(nodes: ContentNode[]): boolean {
+  const leaves = nodes.flatMap((node) => node.children?.length ? collectAssessmentLeaves(node.children) : [node]);
+  const readable = leaves.filter((node) => node.level > 0 && (node.content?.trim().length ?? 0) >= 80);
+  return readable.length > 0 && readable.every((node) => node.content_category === "assessment");
+}
+
+function collectAssessmentLeaves(nodes: ContentNode[]): ContentNode[] {
+  return nodes.flatMap((node) => node.children?.length ? collectAssessmentLeaves(node.children) : [node]);
+}
 
 function normalizedTitle(title: string | null | undefined): string {
   return (title ?? "").trim().replace(/\s+/g, " ");
@@ -22,7 +53,7 @@ export function isLearnableContentNode(node: ContentNode): boolean {
 
 /** A quiz needs a precise lesson context, not a book/chapter container. */
 export function isPracticeEligibleContentNode(node: ContentNode): boolean {
-  return isLearnableContentNode(node) && (node.children?.length ?? 0) === 0;
+  return isStudyEligibleContentNode(node) && (node.children?.length ?? 0) === 0;
 }
 
 export function findFirstContentNode(nodes: ContentNode[]): ContentNode | null {

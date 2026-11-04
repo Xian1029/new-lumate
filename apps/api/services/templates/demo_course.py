@@ -197,21 +197,22 @@ _FLASHCARDS = [
 ]
 
 
-async def seed_demo_course(db: AsyncSession) -> bool:
+async def seed_demo_course(db: AsyncSession, owner: User | None = None) -> bool:
     """Seed the demo course if it does not already exist.
 
     Returns True if the course was created, False if it already existed.
     """
     # Check if demo course already exists
-    result = await db.execute(
-        select(Course).where(Course.name == DEMO_COURSE_NAME)
-    )
+    existing_query = select(Course).where(Course.name == DEMO_COURSE_NAME)
+    if owner is not None:
+        existing_query = existing_query.where(Course.user_id == owner.id)
+    result = await db.execute(existing_query)
     if result.scalar_one_or_none():
         return False
 
     # Ensure a local user exists (single-user mode)
-    result = await db.execute(select(User).limit(1))
-    user = result.scalar_one_or_none()
+    result = await db.execute(select(User).limit(1)) if owner is None else None
+    user = owner or (result.scalar_one_or_none() if result is not None else None)
     if not user:
         user = User(name="Local User")
         db.add(user)

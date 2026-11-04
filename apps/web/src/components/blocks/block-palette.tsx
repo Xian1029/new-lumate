@@ -10,6 +10,7 @@ import { useParams } from "next/navigation";
 import { useT } from "@/lib/i18n-context";
 import { recordBlockEvent } from "@/hooks/use-block-engagement";
 import { buildLayoutFromMode } from "@/lib/block-system/templates";
+import { hasStudyContent } from "@/lib/content-tree";
 
 export function BlockPalette() {
   const t = useT();
@@ -20,8 +21,11 @@ export function BlockPalette() {
   const blocks = useWorkspaceStore((s) => s.spaceLayout.blocks);
   const mode = useWorkspaceStore((s) => s.spaceLayout.mode);
   const courses = useCourseStore((s) => s.courses);
+  const contentTree = useCourseStore((s) => s.contentTree);
+  const contentTreeCourseId = useCourseStore((s) => s.contentTreeCourseId);
   const params = useParams();
   const courseId = (params?.id as string) ?? "";
+  const canStudy = contentTreeCourseId === courseId && hasStudyContent(contentTree);
 
   const unlockCtx = useMemo(
     () => getUnlockContext(courseId, courses.length),
@@ -66,6 +70,7 @@ export function BlockPalette() {
           {/* Palette dropdown */}
           <div role="menu" aria-label={t("ui.add_block")} className="absolute bottom-full mb-2 z-50 w-72 max-h-80 overflow-auto rounded-2xl bg-popover p-2 animate-slide-up" style={{ boxShadow: "var(--shadow-elevated)" }}>
             {USER_ADDABLE_BLOCKS.map((type) => {
+              if (!canStudy && ["quiz", "flashcards", "review", "wrong_answers", "forecast"].includes(type)) return null;
               const entry = BLOCK_REGISTRY[type];
               if (!entry) return null;
               const { unlocked, unlockHint } = isBlockUnlocked(type, ctxWithMode);

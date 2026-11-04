@@ -22,6 +22,7 @@ from services.llm.readiness import ensure_llm_ready
 from services.content_text import is_assessment_content
 from services.parser.notes import build_fallback_notes, is_primary_chinese, normalize_generated_markdown, restructure_notes
 from services.preference.engine import resolve_preferences
+from services.ingestion.document_structure import assessment_note_source
 
 router = APIRouter()
 
@@ -67,11 +68,15 @@ async def _validate_personal_note_node(
         )
     )
     node = result.scalar_one_or_none()
-    if not node or not is_assessment_content(
+    if not node or not (
+        (node.content_category == "assessment" and node.level > 0 and bool((node.content or "").strip()))
+        or is_assessment_content(
         node.title,
         node.content,
         content_category=node.content_category,
         level=node.level,
+        source_file=node.source_file,
+        )
     ):
         raise NotFoundError(resource="content_node", resource_id=str(node_id))
     return node
@@ -112,11 +117,13 @@ async def restructure_content(body: RestructureRequest, user: User = Depends(get
     # Verify course ownership
     await get_course_or_404(db, node.course_id, user_id=user.id)
 
-    if not is_assessment_content(
+    is_question_section = node.content_category == "assessment" and node.level > 0
+    if not is_question_section and not is_assessment_content(
         node.title,
         node.content,
         content_category=node.content_category,
         level=node.level,
+        source_file=node.source_file,
     ):
         raise ValidationError("Preface, catalog and reference sections do not generate AI notes")
 
@@ -125,11 +132,20 @@ async def restructure_content(body: RestructureRequest, user: User = Depends(get
 
     note_format = body.format_override or resolved.preferences.get("note_format", "bullet_point")
     visual_pref = resolved.preferences.get("visual_preference", "auto")
+    source_content = node.content
+    if is_question_section:
+        section_rows = (await db.execute(select(CourseContentTree).where(
+            CourseContentTree.course_id == node.course_id,
+        ))).scalars().all()
+        source_content = assessment_note_source(node, section_rows, 4000)
+        if len(source_content) < 12:
+            raise ValidationError("本节题目主要由图片或公式构成，请打开原文件核对后使用 AI 精读")
 
     await ensure_llm_ready("Notes restructuring")
     try:
         ai_content = await asyncio.wait_for(
-            restructure_notes(node.content, node.title, note_format, visual_pref, allow_fallback=False),
+            restructure_notes(source_content, node.title, note_format, visual_pref,
+                              allow_fallback=False, assessment_mode=is_question_section),
             timeout=150,
         )
     except (ConnectionError, TimeoutError, ValueError, KeyError, RuntimeError) as exc:
@@ -374,11 +390,25 @@ async def get_generated_note_for_node(
     # the same structured note shape instead of making the unit page render a
     # raw wall of extracted PDF text. This keeps all subjects consistent and
     # remains deterministic until the learner regenerates an AI note.
+    if node and node.content_category == "assessment" and node.level > 0 and node.content:
+        section_rows = (await db.execute(select(CourseContentTree).where(
+            CourseContentTree.course_id == course_id,
+        ))).scalars().all()
+        source = assessment_note_source(node, section_rows, 4000)
+        return {
+            "id": f"fallback-{node.id}",
+            "title": normalize_generated_markdown(node.title),
+            "markdown": build_fallback_notes(source, node.title) if len(source) >= 12 else "本节题目主要由图片或公式构成，请打开原文件核对后使用 AI 精读。",
+            "format": "structured_fallback",
+            "auto_generated": False,
+            "version": 0,
+        }
     if node and node.content and is_assessment_content(
         node.title,
         node.content,
         content_category=node.content_category,
         level=node.level,
+        source_file=node.source_file,
     ):
         return {
             "id": f"fallback-{node.id}",

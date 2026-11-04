@@ -1,6 +1,7 @@
 "use client";
 import { useT } from "@/lib/i18n-context";
 import { Badge } from "@/components/ui/badge";
+import { MarkdownRenderer } from "@/components/shared/markdown-renderer";
 import { CheckCircle2, Lightbulb } from "lucide-react";
 import type { AnswerResult } from "@/lib/api";
 
@@ -111,17 +112,17 @@ export function QuizResult({ result, userAnswerDisplay, questionType, answeredOn
           {badgeText}
         </Badge>
         {displayedUserAnswer ? (
-          <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap break-words">
+          <div className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap break-words">
             <span className="font-medium text-foreground/80">你的答案：</span>
-            {_formatUserAnswer(displayedUserAnswer, questionType)}
-          </p>
+            <MarkdownRenderer content={_formatUserAnswer(displayedUserAnswer, questionType)} className="inline-block align-top [&_p]:my-0" />
+          </div>
         ) : null}
         {/* 正确答案（即时提交 + answeredOnly 回看都显示） */}
         {result.correct_answer ? (
-          <p className="text-xs leading-relaxed whitespace-pre-wrap break-words">
+          <div className="text-xs leading-relaxed whitespace-pre-wrap break-words">
             <span className="font-medium text-success/90">正确答案：</span>
-            <span className="text-foreground">{_formatCorrectAnswer(result.correct_answer, questionType)}</span>
-          </p>
+            <MarkdownRenderer content={_formatCorrectAnswer(result.correct_answer, questionType)} className="inline-block align-top text-foreground [&_p]:my-0" />
+          </div>
         ) : !answeredOnly && result.is_correct === false ? (
           <p className="text-xs leading-relaxed">
             <span className="font-medium text-success/90">正确答案：</span>
@@ -131,10 +132,10 @@ export function QuizResult({ result, userAnswerDisplay, questionType, answeredOn
 
         {/* 解析说明：无论 answeredOnly / 答对 / 答错，只要 explanation 非空就一定显示 */}
         {result.explanation ? (
-          <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap break-words">
+          <div className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap break-words">
             <span className="font-medium text-foreground/80">解析说明：</span>
-            {result.explanation}
-          </p>
+            <MarkdownRenderer content={result.explanation} className="inline-block align-top [&_p]:my-0" />
+          </div>
         ) : !answeredOnly ? (
           <p className="text-xs text-muted-foreground leading-relaxed">{fallbackCopy}</p>
         ) : null}

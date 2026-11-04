@@ -29,10 +29,10 @@ export interface IngestionPageStats {
     ai_enhanced?: boolean;
   };
   quality_notice?: {
-    code: "EMBEDDED_MEDIA_NOT_TEXT" | "LOW_TEXT_CONTENT" | "SEMANTIC_STRUCTURE_USED";
+    code: "EMBEDDED_MEDIA_NOT_TEXT" | "EXAM_MEDIA_UNREADABLE" | "LOW_TEXT_CONTENT" | "SEMANTIC_STRUCTURE_USED" | "SOURCE_READING_ONLY";
     title: string;
     message: string;
-    action: "replace_optional" | "review_outline";
+    action: "replace_optional" | "review_outline" | "none";
   };
 }
 

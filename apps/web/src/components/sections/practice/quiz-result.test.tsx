@@ -28,7 +28,7 @@ describe("QuizResult", () => {
     );
 
     expect(screen.getByText("再检查一下")).toBeInTheDocument();
-    expect(screen.getByText("正确", { selector: "span.text-foreground" })).toBeInTheDocument();
+    expect(screen.getByText("正确", { selector: "[role=article] p" })).toBeInTheDocument();
     expect(screen.queryByText("TRUE")).not.toBeInTheDocument();
   });
 

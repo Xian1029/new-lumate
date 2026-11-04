@@ -5,7 +5,7 @@ import { PracticeSection } from "@/components/sections/practice-section";
 import type { BlockComponentProps } from "@/lib/block-system/registry";
 import { useCourseStore } from "@/store/course";
 import { useWorkspaceStore } from "@/store/workspace";
-import { findNodeById, isPracticeEligibleContentNode } from "@/lib/content-tree";
+import { findNodeById, isAssessmentOnlyCourse, isPracticeEligibleContentNode } from "@/lib/content-tree";
 
 export default function FlashcardsBlock({ courseId, aiActionsEnabled }: BlockComponentProps) {
   const contentTree = useCourseStore((state) => state.contentTree);
@@ -17,7 +17,7 @@ export default function FlashcardsBlock({ courseId, aiActionsEnabled }: BlockCom
   // lesson, never a book root, chapter container, preface, or stale node from
   // another learning space. This guard also protects focused/deep-link mounts
   // that bypass BlockGrid.
-  if (!selectedNode || !isPracticeEligibleContentNode(selectedNode)) return null;
+  if (contentTreeCourseId !== courseId || (!isAssessmentOnlyCourse(contentTree) && (!selectedNode || !isPracticeEligibleContentNode(selectedNode)))) return null;
 
   return (
     <div role="region" aria-label={t("ui.flashcards")} className="h-full min-h-0 overflow-hidden flex flex-col">

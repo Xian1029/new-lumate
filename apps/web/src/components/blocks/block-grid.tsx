@@ -7,7 +7,7 @@ import { useWorkspaceStore } from "@/store/workspace";
 import { useCourseStore } from "@/store/course";
 import { useRovingTabindex } from "@/hooks/use-roving-tabindex";
 import { BLOCK_REGISTRY } from "@/lib/block-system/registry";
-import { findNodeById, isPracticeEligibleContentNode } from "@/lib/content-tree";
+import { findNodeById, hasStudyContent, isAssessmentOnlyCourse, isPracticeEligibleContentNode } from "@/lib/content-tree";
 import { BlockWrapper } from "./block-wrapper";
 import { BlockPalette } from "./block-palette";
 import { cn } from "@/lib/utils";
@@ -70,10 +70,15 @@ export function BlockGrid({ courseId, aiActionsEnabled }: BlockGridProps) {
   useRovingTabindex(gridRef, "both");
 
   const selectedNode = contentTreeCourseId === courseId ? findNodeById(contentTree, selectedNodeId) : null;
-  const canPracticeCurrentNode = Boolean(selectedNode && isPracticeEligibleContentNode(selectedNode));
+  const courseHasStudyContent = contentTreeCourseId === courseId && hasStudyContent(contentTree);
+  const canPracticeCurrentNode = contentTreeCourseId === courseId && (
+    isAssessmentOnlyCourse(contentTree) || Boolean(selectedNode && isPracticeEligibleContentNode(selectedNode))
+  );
   const allVisibleBlocks = blocks.filter((b) =>
     (b.isVisible ?? b.visible ?? true) && !!BLOCK_REGISTRY[b.type] &&
-    b.type !== "plan" && (!["quiz", "flashcards"].includes(b.type) || canPracticeCurrentNode),
+    b.type !== "plan" &&
+    (!courseHasStudyContent ? !["quiz", "flashcards", "knowledge_graph", "review", "wrong_answers", "forecast"].includes(b.type) : true) &&
+    (!["quiz", "flashcards"].includes(b.type) || canPracticeCurrentNode),
   );
   const hasFocusedBlock = !!focusedBlockId && allVisibleBlocks.some((block) => block.id === focusedBlockId);
   const visibleBlocks = hasFocusedBlock
