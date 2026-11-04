@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Bot, KeyRound, LogOut, Plus, Settings2, Shield, UserRound, UsersRound } from "lucide-react";
-import { getMe, logout, type CurrentUser } from "@/lib/account";
+import { AccountError, getMe, logout, type CurrentUser } from "@/lib/account";
 import { deleteCourse, startLearningPlan } from "@/lib/api";
 import { useLearningHome } from "./_hooks/use-learning-home";
 import { DailyMomentum, DraftPlansSection, FirstSpaceEmptyState, LearningSummary, NextLearningCard, PendingPlansSection, ProcessingSection, RecentLearning, ReviewSection, SpacesSection, TodayTasksSection } from "./_components/learning-home";
@@ -29,6 +29,7 @@ export default function LearningHomePage() {
   const [showNewSpaceButton, setShowNewSpaceButton] = useState(true);
   const [account, setAccount] = useState<CurrentUser | null>(null);
   const [accessReady, setAccessReady] = useState(false);
+  const [accessError, setAccessError] = useState(false);
   const navigate = (href: string) => router.push(href);
   // Await the authoritative task mutation before navigating.  The endpoint is
   // idempotent for IN_PROGRESS, so a retried click never turns into a 409.
@@ -63,14 +64,17 @@ export default function LearningHomePage() {
         }
       }
       setAccessReady(true);
-    }).catch((error: Error) => {
-      // /auth is intentionally absent in legacy single-user deployments.
-      if (error.message.startsWith("401:")) router.replace("/login");
+    }).catch((error: unknown) => {
+      if (error instanceof AccountError && (error.status === 401 || error.status === 403)) {
+        router.replace("/login");
+        return;
+      }
+      setAccessError(true);
     });
   }, [router]);
 
   const empty = !loading && overview?.learning_spaces.length === 0;
-  if (!accessReady) return <main className="grid min-h-screen place-items-center bg-background text-sm text-muted-foreground">正在检查学习账号配置…</main>;
+  if (!accessReady) return <main className="grid min-h-screen place-items-center bg-background text-sm text-muted-foreground">{accessError ? <div className="text-center"><p>暂时无法检查学习账号，请稍后重试。</p><button type="button" onClick={() => window.location.reload()} className="mt-3 rounded-lg bg-brand px-4 py-2 text-brand-foreground">重新检查</button></div> : "正在检查学习账号配置…"}</main>;
   const toggleNewSpaceButton = () => {
     const next = !showNewSpaceButton;
     setShowNewSpaceButton(next);
