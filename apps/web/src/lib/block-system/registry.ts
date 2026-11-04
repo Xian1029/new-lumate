@@ -122,8 +122,5 @@ export const BLOCK_REGISTRY: Record<BlockType, BlockRegistryEntry> = {
 
 /** Block types available for learners to add manually. */
 export const USER_ADDABLE_BLOCKS: BlockType[] = [
-  // Practice is a core capability: users may not remove the protected default
-  // cards, but must be able to restore a missing quiz or flashcard entry.
-  "notes", "quiz", "flashcards", "review", "plan",
-  "progress", "wrong_answers", "forecast", "summary", "agent_insight",
+  "review", "progress", "wrong_answers", "summary", "agent_insight",
 ];
