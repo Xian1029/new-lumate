@@ -112,8 +112,12 @@ def validate(values):
     auth_enabled = auth_value in ("1", "true", "yes", "on")
     if not auth_enabled and values.get("DEPLOYMENT_MODE", "single_user") != "single_user":
         raise ValueError("AUTH_ENABLED=false requires DEPLOYMENT_MODE=single_user.")
-    if auth_enabled and len(values.get("JWT_SECRET_KEY", "")) < 32:
+    if auth_enabled and values.get("DEPLOYMENT_MODE") != "multi_user":
+        raise ValueError("AUTH_ENABLED=true requires DEPLOYMENT_MODE=multi_user.")
+    if auth_enabled and (missing(values.get("JWT_SECRET_KEY")) or len(values["JWT_SECRET_KEY"]) < 32):
         raise ValueError("JWT_SECRET_KEY must be at least 32 characters when AUTH_ENABLED=true.")
+    if auth_enabled and (missing(values.get("ADMIN_INITIAL_PASSWORD")) or len(values["ADMIN_INITIAL_PASSWORD"]) < 8):
+        raise ValueError("ADMIN_INITIAL_PASSWORD must be set to at least 8 characters when AUTH_ENABLED=true.")
     try:
         if len(base64.b64decode(values["ENCRYPTION_KEY"], altchars=b"-_", validate=True)) != 32:
             raise ValueError()
@@ -191,6 +195,13 @@ def main():
         for key in ("LLM_PROVIDER", "LLM_MODEL", *KEYS.values()):
             if not missing(previous_profile.get(key)):
                 values[key] = updates[key] = previous_profile[key]
+    if missing(values.get("JWT_SECRET_KEY")):
+        old_jwt = previous.get("JWT_SECRET_KEY", "")
+        jwt_secret = old_jwt if not missing(old_jwt) and len(old_jwt) >= 32 else secrets.token_hex(32)
+        values["JWT_SECRET_KEY"] = updates["JWT_SECRET_KEY"] = jwt_secret
+        print("Prepared a persistent login signing key.", flush=True)
+    elif not missing(previous.get("JWT_SECRET_KEY")) and values["JWT_SECRET_KEY"] != previous["JWT_SECRET_KEY"]:
+        raise ValueError("JWT_SECRET_KEY differs from the running Lumate container. Keep the original key to preserve logins.")
     # A legacy JWT key signed CSRF tokens before these secrets were separated.
     # Reuse it once when migrating an existing installation, so browser tokens
     # stay valid. JWT authentication itself is selected only by AUTH_ENABLED.
@@ -216,9 +227,8 @@ def main():
                 "Restore the original key in the selected deploy env file before continuing."
             )
         values["ENCRYPTION_KEY"] = updates["ENCRYPTION_KEY"] = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
-    if missing(values.get("CORS_ORIGINS")) or values.get("CORS_ORIGINS") == "http://localhost:3003":
-        origin = input("Public origin (e.g. https://learn.example.com): ").strip()
-        values["CORS_ORIGINS"] = updates["CORS_ORIGINS"] = origin
+    if missing(values.get("CORS_ORIGINS")):
+        values["CORS_ORIGINS"] = updates["CORS_ORIGINS"] = "http://localhost:3003"
     provider = runtime.get("LLM_PROVIDER") or values.get("LLM_PROVIDER") or previous.get("LLM_PROVIDER") or "deepseek"
     if options.configure or provider not in KEYS:
         provider = input("Cloud provider [deepseek]: ").strip().lower() or "deepseek"
@@ -233,14 +243,14 @@ def main():
         raise ValueError("Model name is required.")
     key_name = KEYS[provider]
     llm_secret = runtime.get(key_name, values.get(key_name) or previous.get(key_name) or "")
-    if options.configure or missing(llm_secret):
+    if options.configure:
         if not sys.stdin.isatty():
             raise ValueError("Run in an interactive terminal to enter the API key with hidden input.")
         llm_secret = getpass.getpass(f"{provider} API key (hidden): ").strip()
-    if missing(llm_secret):
-        raise ValueError("A real cloud API key is required.")
-    updates.update(LLM_PROVIDER=provider, LLM_MODEL=model, LLM_REQUIRED="true")
-    updates[key_name] = llm_secret
+    has_llm_secret = not missing(llm_secret)
+    updates.update(LLM_PROVIDER=provider, LLM_MODEL=model, LLM_REQUIRED="true" if has_llm_secret else "false")
+    if has_llm_secret:
+        updates[key_name] = llm_secret
     values.update(updates)
     validate(values)
     env_path.parent.mkdir(parents=True, exist_ok=True)
@@ -265,7 +275,7 @@ def main():
             if str(actual.get(setting_name, "")).lower() != expected_value:
                 raise ValueError(f"Docker Compose API environment must set {setting_name}={expected_value} before deployment.")
     actual = config["services"]["api"].get("environment", {})
-    if actual.get("LLM_PROVIDER") != provider or actual.get("LLM_MODEL") != model or actual.get(key_name) != llm_secret:
+    if actual.get("LLM_PROVIDER") != provider or actual.get("LLM_MODEL") != model or (has_llm_secret and actual.get(key_name) != llm_secret):
         raise ValueError("Docker Compose API LLM settings differ from the selected deployment profile. Check env-file overrides before building.")
     if config["networks"]["default"]["name"] != PROJECT + "-network":
         raise ValueError("Unexpected network scope in deployment Compose file.")
@@ -283,7 +293,8 @@ def main():
     if env_path == ROOT / "deploy/.env.development":
         preflight.append("--require-development-single-user")
     try:
-        run(compose + ["run", "--rm", "--no-deps", "-T", "api"] + preflight, timeout=180)
+        if has_llm_secret:
+            run(compose + ["run", "--rm", "--no-deps", "-T", "api"] + preflight, timeout=180)
     except subprocess.CalledProcessError as exc:
         # Compose and Python may include credentials in arbitrary stderr. Only
         # relay the probe's deliberately sanitized, fixed-format status line.
@@ -301,7 +312,8 @@ def main():
             f"{exc.returncode}). Run the one-off API container diagnostic in DEPLOYMENT.md; "
             "no Lumate services were replaced."
         ) from None
-    print("LLM check passed. Starting Lumate services...", flush=True)
+    print("LLM check passed." if has_llm_secret else "No server AI key configured; configure platform AI in the admin page after login.", flush=True)
+    print("Starting Lumate services...", flush=True)
     run(compose + ["up", "-d", "--no-build"], capture=False, timeout=240)
     deadline = time.monotonic() + 180
     while time.monotonic() < deadline:
@@ -313,7 +325,7 @@ def main():
                 if running_env.get(setting_name, "").lower() != expected_value:
                     raise ValueError(f"Running API container does not have {setting_name}={expected_value}; deployment is not complete.")
         if all(s["State"].get("Health", {}).get("Status") == "healthy" for s in states):
-            print("Deployment successful: API, Web and Redis are healthy. LLM settings survive restarts.")
+            print("Deployment successful: API, Web and Redis are healthy.")
             if env_path == ROOT / "deploy/.env.development":
                 print("API deployment profile: ENVIRONMENT=development, AUTH_ENABLED=false, DEPLOYMENT_MODE=single_user.")
             return

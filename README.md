@@ -4,7 +4,7 @@ Lumate 是基于学习资料的 AI 学习系统，提供学习空间、教材解
 
 ## 一条命令部署
 
-本地 Docker 和 Linux 服务器统一使用仓库根目录的 `docker-start.sh`、`docker-compose.deploy.yml` 及同一套 Dockerfile。这样两边的镜像构建和服务拓扑一致。两台机器的数据及密钥仍各自独立；需要一致的业务内容时须另行迁移数据。
+本地 Docker 和 Linux 服务器统一使用仓库根目录的 `linux.sh`、`docker-compose.deploy.yml` 及同一套 Dockerfile。这样两边的镜像构建和服务拓扑一致。两台机器的数据及密钥仍各自独立；需要一致的业务内容时须另行迁移数据。
 
 环境要求：Docker Engine、Docker Compose v2、Python 3、可访问 Docker/npm/Python 依赖源以及所选云端模型 API 的网络。运行用户须有 Docker 权限。先检查：
 
@@ -17,11 +17,9 @@ python3 --version
 首次部署：
 
 ```sh
-git clone https://github.com/Xian1029/new-lumate.git
+git clone --branch main https://github.com/Xian1029/new-lumate.git
 cd new-lumate
-cp deploy/.env.production.example deploy/.env.production
-# 编辑 deploy/.env.production，按下文设置模式、地址、密码和 AI Key
-sh docker-start.sh
+sh linux.sh
 ```
 
 已有仓库更新：
@@ -29,14 +27,14 @@ sh docker-start.sh
 ```sh
 git status --short
 git pull --ff-only origin main
-sh docker-start.sh
+sh linux.sh
 ```
 
-脚本会检查依赖、调用项目已有的部署程序，构建 API 和 Web 镜像、执行云端 AI 预检、启动 Redis/API/Web 并等待健康。脚本不会执行 Git 操作、清空数据库或删除上传文件。预检会发起一次真实模型请求，可能产生少量费用。代码更新后仍运行同一条命令；不要用开发专用的 `docker-compose.yml` 或 macOS 进程脚本 `start.sh` 对照线上效果。
+`linux.sh` 首次运行自动创建私有配置文件并生成登录签名密钥和加密密钥，随后校验配置、构建 API 和 Web 镜像、启动 Redis/API/Web 并等待全部服务健康。若事先配置了云端 Key，部署前会发起一次真实模型请求进行预检，可能产生少量费用。未配置 Key 时也可完成部署，管理员登录后在“平台 AI 设置”中配置。脚本不会执行 Git 操作、清空数据库或删除上传文件。代码更新后仍运行同一条命令；不要用开发专用的 `docker-compose.yml` 或 macOS 进程脚本 `start.sh` 对照线上效果。
 
 ## 配置
 
-`deploy/.env.production` 已被 Git 忽略，不能提交到仓库。脚本首次运行会生成或保留 `CSRF_SECRET_KEY` 和 `ENCRYPTION_KEY`；若已有数据卷，必须使用原加密密钥。首次缺少浏览器访问地址或 AI Key 时，脚本会在终端交互询问，Key 输入不回显。也可提前写入配置文件供非交互部署。
+`deploy/.env.production` 已被 Git 忽略，不能提交到仓库。`linux.sh` 首次运行会以私有权限复制配置模板。部署程序会生成或保留 `JWT_SECRET_KEY`、`CSRF_SECRET_KEY` 和 `ENCRYPTION_KEY`；若已有数据卷，必须使用原加密密钥。管理员初始账号为 `admin`，初始密码为 `12345678`，首次登录必须修改。已存在的管理员密码不会因重新部署而重置。建议在首次部署后立即登录修改密码。
 
 | 变量 | 说明 |
 | --- | --- |
@@ -44,30 +42,32 @@ sh docker-start.sh
 | `API_PORT` | API 本机端口，默认 8001 |
 | `CORS_ORIGINS` | 浏览器实际访问来源，例如 `http://localhost:3003` 或 `https://learn.example.com` |
 | `APP_ENVIRONMENT` | 两边都用 `production` 才能保持部署模式一致 |
-| `AUTH_ENABLED` / `DEPLOYMENT_MODE` | 多用户用 `true` / `multi_user`；旧单用户模式用 `false` / `single_user` |
-| `JWT_SECRET_KEY` | 多用户模式至少 32 字符，重启后保持不变 |
-| `ADMIN_INITIAL_PASSWORD` | 首次创建管理员时的初始密码；重启不会重置已修改密码 |
+| `AUTH_ENABLED` / `DEPLOYMENT_MODE` | 生产模板默认 `true` / `multi_user`；旧单用户模式用 `false` / `single_user` |
+| `JWT_SECRET_KEY` | 首次部署自动生成；多用户模式至少 32 字符，重启后保持不变 |
+| `ADMIN_INITIAL_PASSWORD` | 默认 `12345678`；仅首次创建管理员时使用，首次登录必须修改 |
 | `ENCRYPTION_KEY` | 已加密数据的 Fernet 密钥，必须备份和保持稳定 |
 | `LLM_PROVIDER` / `LLM_MODEL` | AI 供应商及模型，例如 `deepseek` / `deepseek-chat` |
-| `DEEPSEEK_API_KEY` 等 | 部署预检使用的服务端 Key；应用内也可管理运行时 Key |
+| `DEEPSEEK_API_KEY` 等 | 可选；配置后部署时测试服务，未配置则登录后在管理员页面设置 |
 
-启用多用户时，首次运行前将以下变量写入配置文件：
+生产模板默认启用多用户。如需自定义初始密码或公开访问地址，可在首次运行后编辑 `deploy/.env.production`，再执行 `sh linux.sh`；修改已有安装的加密密钥会使旧数据无法解密。示例：
 
 ```dotenv
 APP_ENVIRONMENT=production
 AUTH_ENABLED=true
 DEPLOYMENT_MODE=multi_user
-JWT_SECRET_KEY=请替换为至少32字符的随机字符串
+CORS_ORIGINS=https://learn.example.com
 ADMIN_INITIAL_PASSWORD=请替换为强密码
 ```
 
-当前部署程序要求有效的云端 AI Key 完成预检。可配置 `DEEPSEEK_API_KEY`，或按提示输入；支持 DeepSeek、OpenAI、Anthropic、OpenRouter、Gemini 和 Groq。管理页面中的平台 Key 和个人 Key 属于应用运行时配置，不替代首次部署预检。不同环境应分别保管自己的 Key。不要公开配置文件、Compose 展开配置或 `docker inspect` 输出。
+云端 AI Key 可以在部署前写入配置文件，也可以在管理员首次登录后通过前端设置；个人 Key 由各用户按管理员策略配置。预先写入 Key 时，部署会进行真实连通性测试；未写入 Key 时，基础学习页面可启动，AI 功能需等平台或个人 Key 配好后才能使用。支持 DeepSeek、OpenAI、Anthropic、OpenRouter、Gemini 和 Groq。不同环境应分别保管自己的 Key。不要公开配置文件、Compose 展开配置或 `docker inspect` 输出。
 
 可显式指定配置：
 
 ```sh
-sh docker-start.sh --env-file deploy/.env.production
+sh linux.sh --env-file deploy/.env.production
 ```
+
+如已在配置文件中设置云端 Key，想在终端更换供应商、模型或 Key，可运行 `sh linux.sh --configure`；脚本会隐藏输入的 Key 并在启动前验证。首次直接部署无需执行此操作。
 
 同一台主机使用其他配置文件仍会操作同一组容器和数据卷，不能用配置文件名创建独立环境。切换认证模式前应先备份现有数据。
 
@@ -90,7 +90,7 @@ curl -fsS http://127.0.0.1:8001/api/health/live
 ## 保持本地与线上一致
 
 1. 两边检出同一个提交：`git rev-parse HEAD` 的结果应一致。
-2. 两边运行同一命令 `sh docker-start.sh`，使用同一份 `docker-compose.deploy.yml`。
+2. 两边运行同一命令 `sh linux.sh`，使用同一份 `docker-compose.deploy.yml`。
 3. 比较配置中的认证模式、模型、功能开关及依赖构建参数；密钥和地址可因环境不同而不同。
 4. 两边分别检查三个服务健康，并在浏览器执行相同的业务验证。
 

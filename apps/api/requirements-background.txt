@@ -1,0 +1,3 @@
+# Lightweight background services used by the Docker deployment profile.
+redis==5.2.1
+apscheduler>=3.10.0,<4.0.0

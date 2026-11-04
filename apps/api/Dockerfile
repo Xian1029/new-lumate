@@ -12,6 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements-core.txt requirements-full.txt requirements.txt ./
 RUN pip install --no-cache-dir --prefix=/install -r "${PYTHON_REQUIREMENTS}"
 
+# Keep the large core dependency layer reusable when only optional Docker
+# background services change. Full requirements already include these.
+COPY requirements-background.txt ./
+RUN if [ "${PYTHON_REQUIREMENTS}" = "requirements-core.txt" ]; then \
+      pip install --no-cache-dir --prefix=/install -r requirements-background.txt; \
+    fi
+
 # ---- Runtime stage ----
 FROM python:3.11-slim
 

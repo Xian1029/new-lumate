@@ -43,7 +43,7 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set in deploy/.env.production}
       LLM_PROVIDER: ${LLM_PROVIDER:-deepseek}
       LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
-      LLM_REQUIRED: "true"
+      LLM_REQUIRED: ${LLM_REQUIRED:-false}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
