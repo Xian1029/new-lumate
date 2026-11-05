@@ -59,7 +59,7 @@ async def create_user(body: AdminAccountRequest, _: User = Depends(require_super
         raise HTTPException(status_code=409, detail="用户名不可用")
     if body.ai_key_mode not in {"platform", "personal"}:
         raise HTTPException(status_code=422, detail="AI 服务方式无效")
-    user = User(username=username, name=(body.name or username), role="student", hashed_password=hash_password(body.password), can_create_courses=body.can_create_courses, max_courses=body.max_courses, ai_key_mode=body.ai_key_mode)
+    user = User(username=username, name=(body.name or username), role="student", hashed_password=hash_password(body.password), must_change_password=True, can_create_courses=body.can_create_courses, max_courses=body.max_courses, ai_key_mode=body.ai_key_mode)
     db.add(user)
     await db.commit()
     await db.refresh(user)
@@ -111,6 +111,7 @@ async def reset_user_password(user_id: uuid.UUID, body: AdminPasswordReset, _: U
         raise HTTPException(status_code=422, detail="新密码至少需要 8 位")
     user = await _managed_student(db, user_id)
     user.hashed_password = hash_password(body.password)
+    user.must_change_password = True
     from models.user import UserSession
     await db.execute(UserSession.__table__.delete().where(UserSession.user_id == user.id))
     await db.commit()
