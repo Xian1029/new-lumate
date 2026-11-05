@@ -13,4 +13,7 @@ for key in ENCRYPTION_KEY JWT_SECRET_KEY CSRF_SECRET_KEY; do
   fi
 done
 docker network inspect lumate-network >/dev/null 2>&1 || docker network create lumate-network >/dev/null
+for volume in lumate-customized_data lumate-customized_uploads lumate-customized_redis; do
+  docker volume inspect "$volume" >/dev/null 2>&1 || docker volume create "$volume" >/dev/null
+done
 docker compose --env-file .env -f compose.yml up -d --build --wait

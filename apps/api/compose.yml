@@ -25,7 +25,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      ENVIRONMENT: ${APP_ENVIRONMENT:-production}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
       DATABASE_URL: sqlite+aiosqlite:////app/data/lumate.db
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /app/uploads
@@ -49,10 +49,13 @@ services:
 
 volumes:
   app_data:
+    external: true
     name: lumate-customized_data
   uploads:
+    external: true
     name: lumate-customized_uploads
   redis_data:
+    external: true
     name: lumate-customized_redis
 
 networks:
