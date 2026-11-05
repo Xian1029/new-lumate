@@ -44,7 +44,7 @@ export default function LearningHomePage() {
         const response = await fetch("/api/ai-settings/me", { credentials: "include" }).catch(() => null);
         if (!response?.ok) { router.replace("/login"); return; }
         const ai = await response.json();
-        if (!(ai.platform_key_configured && ai.platform_key_enabled) && !ai.personal_key_configured) {
+        if (!ai.effective_key_available) {
           router.replace("/settings/ai?welcome=1"); return;
         }
       }

@@ -55,17 +55,19 @@ async def _platform(db: AsyncSession) -> PlatformAISettings:
         await db.flush()
     return row
 
-def _status(row: PlatformAISettings, personal: UserAISettings | None = None) -> dict:
+def _status(row: PlatformAISettings, personal: UserAISettings | None = None, user: User | None = None) -> dict:
     key = row.get_key()
+    mode = (user.ai_key_mode or "auto") if user else "auto"
     response = {"platform_key_configured": bool(key), "platform_key_enabled": bool(row.platform_key_enabled),
-                "allow_personal_keys": bool(row.allow_personal_keys), "platform_key_masked": _mask(key)}
+                "allow_personal_keys": mode == "personal" or (mode == "auto" and bool(row.allow_personal_keys)),
+                "ai_key_mode": mode, "platform_key_masked": _mask(key)}
     response.update({"platform_provider": row.provider or "deepseek", "platform_model": row.model})
-    effective_key = key if row.platform_key_enabled and key else None
+    effective_key = key if mode != "personal" and row.platform_key_enabled and key else None
     effective_source = "platform" if effective_key else None
     if personal is not None:
         pkey = personal.get_key()
         response.update({"personal_key_configured": bool(pkey), "personal_key_masked": _mask(pkey)})
-        if not effective_key and row.allow_personal_keys and pkey:
+        if not effective_key and (mode == "personal" or (mode == "auto" and row.allow_personal_keys)) and pkey:
             effective_key = pkey
             effective_source = "personal"
         response.update({"personal_provider": personal.provider or "deepseek", "personal_model": personal.model})
@@ -97,12 +99,12 @@ async def _test_key(key: str, scope: str, provider: str = "deepseek", model: str
 async def get_personal_settings(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     platform = await _platform(db)
     personal = (await db.execute(select(UserAISettings).where(UserAISettings.user_id == user.id))).scalar_one_or_none()
-    return _status(platform, personal)
+    return _status(platform, personal, user)
 
 @router.put("/me")
 async def save_personal_settings(body: KeyPayload, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     platform = await _platform(db)
-    if not platform.allow_personal_keys:
+    if not (user.ai_key_mode == "personal" or (user.ai_key_mode == "auto" and platform.allow_personal_keys)):
         raise HTTPException(status_code=403, detail="管理员未允许配置个人 AI Key")
     row = (await db.execute(select(UserAISettings).where(UserAISettings.user_id == user.id))).scalar_one_or_none()
     if row is None:
@@ -112,7 +114,7 @@ async def save_personal_settings(body: KeyPayload, user: User = Depends(get_curr
     row.provider = _provider(body.provider)
     row.model = (body.model or "").strip() or None
     await db.commit()
-    return _status(platform, row)
+    return _status(platform, row, user)
 
 @router.delete("/me", status_code=204)
 async def delete_personal_settings(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
@@ -122,19 +124,23 @@ async def delete_personal_settings(user: User = Depends(get_current_user), db: A
         await db.commit()
 
 @router.post("/me/test")
-async def test_personal_key(body: KeyPayload, user: User = Depends(get_current_user)):
+async def test_personal_key(body: KeyPayload, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    platform = await _platform(db)
+    if not (user.ai_key_mode == "personal" or (user.ai_key_mode == "auto" and platform.allow_personal_keys)):
+        raise HTTPException(status_code=403, detail="当前账号由管理员指定使用平台 AI 服务")
     return await _test_key(body.api_key.strip(), f"user:{user.id}", body.provider, body.model)
 
 @router.post("/me/test-saved")
 async def test_saved_key(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     platform = await _platform(db)
     personal = (await db.execute(select(UserAISettings).where(UserAISettings.user_id == user.id))).scalar_one_or_none()
-    key = platform.get_key() if platform.platform_key_enabled else None
-    if not key and platform.allow_personal_keys and personal:
+    mode = user.ai_key_mode or "auto"
+    key = platform.get_key() if mode != "personal" and platform.platform_key_enabled else None
+    if not key and (mode == "personal" or (mode == "auto" and platform.allow_personal_keys)) and personal:
         key = personal.get_key()
     if not key:
         raise HTTPException(status_code=400, detail="当前账号没有可用的 AI Key")
-    selected = platform if platform.platform_key_enabled and platform.get_key() else personal
+    selected = platform if mode != "personal" and platform.platform_key_enabled and platform.get_key() else personal
     return await _test_key(key, f"saved:{user.id}", selected.provider or "deepseek", selected.model)
 
 @router.get("/platform")
@@ -144,6 +150,8 @@ async def get_platform_settings(_: User = Depends(require_super_admin), db: Asyn
 @router.put("/platform")
 async def save_platform_settings(body: PlatformPayload, admin: User = Depends(require_super_admin), db: AsyncSession = Depends(get_db)):
     row = await _platform(db)
+    if body.enabled is True and not (body.api_key or row.get_key()):
+        raise HTTPException(status_code=422, detail="请先填写并保存平台 API Key，再启用平台服务")
     if body.api_key is not None:
         row.set_key(body.api_key.strip())
     if body.provider is not None:

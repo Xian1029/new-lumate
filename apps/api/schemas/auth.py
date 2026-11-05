@@ -39,5 +39,6 @@ class UserResponse(BaseModel):
     must_change_password: bool = False
     can_create_courses: bool = True
     max_courses: int | None = None
+    ai_key_mode: str = "auto"
 
     model_config = {"from_attributes": True}

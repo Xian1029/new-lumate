@@ -51,13 +51,14 @@ async def _bind_user_ai_credential(db: AsyncSession, user: User, request: Reques
     effective_provider = "deepseek"
     effective_model = None
     source = None
-    if platform and platform.platform_key_enabled:
+    mode = user.ai_key_mode or "auto"
+    if mode in {"auto", "platform"} and platform and platform.platform_key_enabled:
         effective_key = platform.get_key()
         if effective_key:
             source = "platform"
             effective_provider = platform.provider or "deepseek"
             effective_model = platform.model
-    if not effective_key and (platform is None or platform.allow_personal_keys):
+    if not effective_key and (mode == "personal" or (mode == "auto" and (platform is None or platform.allow_personal_keys))):
         personal = (await db.execute(
             select(UserAISettings).where(UserAISettings.user_id == user.id)
         )).scalar_one_or_none()

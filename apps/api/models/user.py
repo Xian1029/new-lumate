@@ -24,6 +24,7 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     can_create_courses: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default="1")
     max_courses: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ai_key_mode: Mapped[str] = mapped_column(String(16), default="auto", nullable=False, server_default="auto")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

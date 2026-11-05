@@ -22,6 +22,7 @@ router = APIRouter()
 class AdminAccountRequest(RegisterRequest):
     can_create_courses: bool = True
     max_courses: int | None = Field(default=None, ge=0, le=10000)
+    ai_key_mode: str = "platform"
 
 
 class AdminAccountStatus(BaseModel):
@@ -31,6 +32,10 @@ class AdminAccountStatus(BaseModel):
 class AdminCoursePolicy(BaseModel):
     can_create_courses: bool
     max_courses: int | None = Field(default=None, ge=0, le=10000)
+
+
+class AdminAIPolicy(BaseModel):
+    ai_key_mode: str
 
 
 class AdminPasswordReset(BaseModel):
@@ -52,7 +57,9 @@ async def create_user(body: AdminAccountRequest, _: User = Depends(require_super
     username = body.username.strip().lower()
     if username == "admin" or (await db.execute(select(User).where(User.username == username))).scalar_one_or_none():
         raise HTTPException(status_code=409, detail="用户名不可用")
-    user = User(username=username, name=(body.name or username), role="student", hashed_password=hash_password(body.password), can_create_courses=body.can_create_courses, max_courses=body.max_courses)
+    if body.ai_key_mode not in {"platform", "personal"}:
+        raise HTTPException(status_code=422, detail="AI 服务方式无效")
+    user = User(username=username, name=(body.name or username), role="student", hashed_password=hash_password(body.password), can_create_courses=body.can_create_courses, max_courses=body.max_courses, ai_key_mode=body.ai_key_mode)
     db.add(user)
     await db.commit()
     await db.refresh(user)
@@ -82,6 +89,18 @@ async def change_user_course_policy(user_id: uuid.UUID, body: AdminCoursePolicy,
     user = await _managed_student(db, user_id)
     user.can_create_courses = body.can_create_courses
     user.max_courses = body.max_courses
+    await db.commit()
+    return {**_user_response(user).model_dump(), "is_active": user.is_active}
+
+
+@router.patch("/admin/users/{user_id}/ai-policy")
+async def change_user_ai_policy(user_id: uuid.UUID, body: AdminAIPolicy, admin: User = Depends(require_super_admin), db: AsyncSession = Depends(get_db)):
+    if body.ai_key_mode not in {"platform", "personal"}:
+        raise HTTPException(status_code=422, detail="AI 服务方式无效")
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is None or (user.role != "student" and user.id != admin.id):
+        raise HTTPException(status_code=404, detail="账号不存在")
+    user.ai_key_mode = body.ai_key_mode
     await db.commit()
     return {**_user_response(user).model_dump(), "is_active": user.is_active}
 
@@ -120,6 +139,7 @@ def _user_response(user: User) -> UserResponse:
         must_change_password=user.must_change_password,
         can_create_courses=user.can_create_courses,
         max_courses=user.max_courses,
+        ai_key_mode=user.ai_key_mode,
     )
 
 

@@ -33,11 +33,8 @@ export default function LoginPage() {
       const settings = await fetch("/api/ai-settings/me", { credentials: "include" })
         .then((response) => response.ok ? response.json() : null)
         .catch(() => null);
-      const needsPersonalKey = user.role === "student"
-        && settings?.allow_personal_keys
-        && !(settings.platform_key_configured && settings.platform_key_enabled)
-        && !settings.personal_key_configured;
-      router.replace(needsPersonalKey ? "/settings/ai?welcome=1" : "/");
+      const needsAISetup = user.role === "student" && settings && !settings.effective_key_available;
+      router.replace(needsAISetup ? "/settings/ai?welcome=1" : "/");
     } catch (reason) {
       if (reason instanceof AccountError && reason.code === "account_disabled") {
         setAccountDisabled(true);

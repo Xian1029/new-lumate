@@ -94,6 +94,7 @@ _LOCAL_ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
         "must_change_password": "BOOLEAN NOT NULL DEFAULT 0",
         "can_create_courses": "BOOLEAN NOT NULL DEFAULT 1",
         "max_courses": "INTEGER",
+        "ai_key_mode": "VARCHAR(16) NOT NULL DEFAULT 'auto'",
         "updated_at": "DATETIME",
     },
     "courses": {
