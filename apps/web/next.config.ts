@@ -1,5 +1,4 @@
 import type { NextConfig } from "next";
-import path from "path";
 
 // Local quickstart runs FastAPI on 8000. Docker production overrides this at
 // build time with the internal `api:8000` service URL.
@@ -26,9 +25,9 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  outputFileTracingRoot: path.join(__dirname, "..", ".."),
+  outputFileTracingRoot: __dirname,
   turbopack: {
-    root: path.join(__dirname, "..", ".."),
+    root: __dirname,
   },
   // Prevent Next.js from issuing 308 redirects for trailing slashes on /api/* paths.
   // Without this, POST /api/courses/ gets a 308 before the rewrite runs, and the

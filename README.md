@@ -2,6 +2,15 @@
 
 Lumate 是基于学习资料的 AI 学习系统，提供学习空间、教材解析、学习计划、AI Tutor、练习判题、笔记、闪卡、知识图谱和学习进度。前端使用 Next.js，后端使用 FastAPI，数据使用 SQLite 和 Docker 命名卷，后台任务使用 Redis。
 
+## 独立 API / Web 仓库
+
+`apps/api` 和 `apps/web` 现在各自包含 Dockerfile、Compose 文件、构建/部署脚本与 README，并分别发布到 [lumate-api](https://github.com/Xian1029/lumate-api) 和 [lumate-web](https://github.com/Xian1029/lumate-web)：
+
+- API：进入 `apps/api` 执行 `sh build.sh`，单独生成 `lumate-api:local`。
+- Web：进入 `apps/web` 执行 `sh build.sh`，单独生成 `lumate-web:local`。构建时可设置 `API_UPSTREAM_URL`。
+
+新部署先按两个子目录的 README 配置 API，再部署 Web。两者通过 `lumate-network` 通信。切换已有服务器前，须保留原 `ENCRYPTION_KEY`，备份 `lumate-customized_data` 和 `lumate-customized_uploads`，停用旧组合式容器但不删除数据卷。原 `linux.sh` 仍是组合式部署入口，便于现有安装持续运行；独立部署不依赖仓库根目录。具体步骤见 [拆分部署说明](docs/SPLIT_DEPLOYMENT.md)。
+
 ## 一条命令部署
 
 本地 Docker 和 Linux 服务器统一使用仓库根目录的 `linux.sh`、`docker-compose.deploy.yml` 及同一套 Dockerfile。这样两边的镜像构建和服务拓扑一致。两台机器的数据及密钥仍各自独立；需要一致的业务内容时须另行迁移数据。

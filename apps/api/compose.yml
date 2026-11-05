@@ -1,0 +1,61 @@
+name: lumate-api
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    container_name: lumate-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks: [lumate]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      args:
+        PYTHON_REQUIREMENTS: ${API_PYTHON_REQUIREMENTS:-requirements-core.txt}
+    image: lumate-api:${IMAGE_TAG:-local}
+    container_name: lumate-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ENVIRONMENT: ${APP_ENVIRONMENT:-production}
+      DATABASE_URL: sqlite+aiosqlite:////app/data/lumate.db
+      REDIS_URL: redis://redis:6379/0
+      UPLOAD_DIR: /app/uploads
+      LOCAL_ENV_FILE: /app/data/runtime.env
+    ports:
+      - "127.0.0.1:${API_PORT:-8001}:8000"
+    volumes:
+      - app_data:/app/data
+      - uploads:/app/uploads
+      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
+    networks: [lumate]
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/api/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  app_data:
+    name: lumate-customized_data
+  uploads:
+    name: lumate-customized_uploads
+  redis_data:
+    name: lumate-customized_redis
+
+networks:
+  lumate:
+    external: true
+    name: lumate-network
