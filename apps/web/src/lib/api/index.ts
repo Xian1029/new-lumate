@@ -20,6 +20,7 @@ export {
   updateCourse,
   deleteCourse,
   getContentTree,
+  confirmSourcePage,
   restructureNotes,
   saveGeneratedNotes,
   listGeneratedNoteBatches,

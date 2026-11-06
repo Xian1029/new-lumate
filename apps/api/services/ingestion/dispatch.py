@@ -120,6 +120,16 @@ async def dispatch_content(
             )
         from services.parser.pdf import ensure_tree_parentage
         nodes = ensure_tree_parentage(nodes)
+        # Keep page links for every newly uploaded PDF, including generic
+        # notes/reports. Textbook preview nodes may already have links; the
+        # annotator preserves those instead of recomputing them.
+        if category != "assessment" and parsed_nodes is None and job.file_path and source_name.endswith(".pdf"):
+            from config import settings
+            from services.upload_storage import resolve_upload_path
+            from services.parser.pdf import _annotate_source_pages
+            source = resolve_upload_path(job.file_path, settings.upload_dir)
+            if source and source.is_file():
+                await asyncio.to_thread(_annotate_source_pages, nodes, str(source))
         if category == "assessment" and job.file_path:
             from config import settings
             from services.upload_storage import resolve_upload_path

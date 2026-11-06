@@ -178,7 +178,7 @@ export interface ContentNode {
   source_type: string;
   source_file?: string | null;
   content_category?: "lecture_slides" | "textbook" | "notes" | "syllabus" | "assignment" | "assessment" | "exam_schedule" | "reference" | "other" | null;
-  metadata?: { source_pages?: number[] } | null;
+  metadata?: { source_pages?: number[]; source_page_start?: number; source_page_end?: number; source_page_confidence?: string } | null;
   children: ContentNode[];
   file_type?: string;
   file_id?: string;
@@ -186,6 +186,14 @@ export interface ContentNode {
 
 export async function getContentTree(courseId: string): Promise<ContentNode[]> {
   return request(`/courses/${courseId}/content-tree`);
+}
+
+export async function confirmSourcePage(courseId: string, nodeId: string, jobId: string, page: number): Promise<{ page: number; page_count: number; status: string }> {
+  return request(`/courses/${courseId}/content-tree/${nodeId}/source-page`, {
+    method: "PUT",
+    suppressErrorToast: true,
+    body: JSON.stringify({ job_id: jobId, page }),
+  });
 }
 
 export interface RestructuredNotes {

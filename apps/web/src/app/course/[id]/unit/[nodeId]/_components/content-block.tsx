@@ -84,7 +84,7 @@ export function ContentBlock({ node, courseId }: { node: ContentNode; courseId: 
             className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs font-semibold text-emerald-800 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50"
           >
             <ExternalLink className="size-3.5" />
-            {t("unit.viewSourceDocument")}
+            {t("unit.viewSourceDocument")}{sourceState?.page ? ` · 第 ${sourceState.page} 页` : " · 暂未定位本节页码"}
           </a>
         ) : null}
       </div>

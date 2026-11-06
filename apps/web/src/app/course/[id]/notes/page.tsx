@@ -61,6 +61,7 @@ export default function NotesPage() {
           aiActionsEnabled={aiActionsEnabled}
           initialFileJobId={searchParams.get("reader")}
           initialPage={Number(searchParams.get("page")) || 1}
+          initialNodeId={searchParams.get("node")}
           onCloseReader={() => {
             const returnNodeId = searchParams.get("node");
             if (searchParams.get("from") === "unit" && returnNodeId) {

@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +28,7 @@ from schemas.course import CourseCreate, CourseOverviewCard, CourseResponse, Con
 from services.auth.dependency import get_current_user
 from services.course_access import get_course_or_404
 from services.upload_storage import resolve_upload_path
+from libs.exceptions import ValidationError
 from services.content_text import (
     clean_course_text,
     clean_course_title,
@@ -38,6 +40,54 @@ from services.content_text import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class SourcePageConfirmation(BaseModel):
+    job_id: uuid.UUID
+    page: int = Field(ge=1)
+
+
+@router.put("/{course_id}/content-tree/{node_id}/source-page", summary="Confirm a source PDF page")
+async def confirm_source_page(
+    course_id: uuid.UUID,
+    node_id: uuid.UUID,
+    body: SourcePageConfirmation,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist a learner-confirmed page without guessing from document order."""
+    await get_course_or_404(db, course_id, user_id=user.id)
+    node = (await db.execute(select(CourseContentTree).where(
+        CourseContentTree.id == node_id, CourseContentTree.course_id == course_id,
+    ))).scalar_one_or_none()
+    job = (await db.execute(select(IngestionJob).where(
+        IngestionJob.id == body.job_id,
+        IngestionJob.course_id == course_id,
+        IngestionJob.user_id == user.id,
+        IngestionJob.file_path.is_not(None),
+    ))).scalar_one_or_none()
+    if not node or not job or (node.source_file or "") != (job.original_filename or "") or not (job.original_filename or "").lower().endswith(".pdf"):
+        raise ValidationError("所选章节与原文文件不匹配")
+    source = resolve_upload_path(job.file_path, settings.upload_dir)
+    if source is None:
+        raise ValidationError("原文文件暂不可用")
+    try:
+        from pypdf import PdfReader
+        page_count = len(PdfReader(str(source), strict=False).pages)
+    except Exception as exc:
+        raise ValidationError("无法读取原文页数") from exc
+    if body.page > page_count:
+        raise ValidationError("页码超出原文范围")
+    node.metadata_ = {
+        **(node.metadata_ or {}),
+        "source_pages": [body.page],
+        "source_page_start": body.page,
+        "source_page_end": body.page,
+        "source_page_confidence": "user_confirmed",
+        "source_page_job_id": str(job.id),
+    }
+    await db.commit()
+    return {"page": body.page, "page_count": page_count, "status": "saved"}
 
 DEFAULT_USER_NAME = "Local User"
 

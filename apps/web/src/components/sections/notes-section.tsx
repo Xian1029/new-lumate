@@ -18,6 +18,7 @@ import {
   saveGeneratedNotes,
   getAiNoteForNode,
   listCourseFiles,
+  confirmSourcePage,
   type AiNoteForNode,
   type UploadedCourseFile,
 } from "@/lib/api";
@@ -49,7 +50,7 @@ function cleanPdfSelection(value: string) {
     .slice(0, 2400);
 }
 
-function PdfStudyReader({ url, courseId, jobId, initialPage = 1 }: { url: string; courseId: string; jobId: string; initialPage?: number }) {
+function PdfStudyReader({ url, courseId, jobId, nodeId, initialPage = 1, onPageSaved }: { url: string; courseId: string; jobId: string; nodeId?: string; initialPage?: number; onPageSaved?: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -63,6 +64,35 @@ function PdfStudyReader({ url, courseId, jobId, initialPage = 1 }: { url: string
   const [status, setStatus] = useState("正在加载课本…");
   const [pageNumber, setPageNumber] = useState(initialPage);
   const [pageCount, setPageCount] = useState(0);
+  const [pageInput, setPageInput] = useState(String(initialPage));
+  const [savingPage, setSavingPage] = useState(false);
+  const [confirmedPage, setConfirmedPage] = useState<number | null>(null);
+
+  useEffect(() => { setPageInput(String(pageNumber)); }, [pageNumber]);
+
+  const jumpToPage = () => {
+    const page = Number(pageInput);
+    if (!Number.isInteger(page) || page < 1 || page > pageCount) {
+      toast.error(`请输入 1 到 ${pageCount} 之间的页码`);
+      return;
+    }
+    setPageNumber(page);
+  };
+
+  const saveCurrentPage = async () => {
+    if (!nodeId || !pageCount || savingPage) return;
+    setSavingPage(true);
+    try {
+      await confirmSourcePage(courseId, nodeId, jobId, pageNumber);
+      setConfirmedPage(pageNumber);
+      onPageSaved?.();
+      toast.success(`已将第 ${pageNumber} 页设为本节起始页`);
+    } catch {
+      toast.error("页码保存失败，请检查当前文件与章节后重试");
+    } finally {
+      setSavingPage(false);
+    }
+  };
 
   useEffect(() => {
     let disposed = false;
@@ -277,7 +307,7 @@ function PdfStudyReader({ url, courseId, jobId, initialPage = 1 }: { url: string
 
   return <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-2 gap-3 p-3 md:grid-cols-[minmax(0,1fr)_24rem] md:grid-rows-1">
     <div className="relative overflow-auto rounded-xl bg-muted/30 p-3">
-      <div className="sticky top-0 z-10 mb-2 flex items-center justify-center gap-3"><Button size="sm" variant="outline" disabled={pageNumber <= 1} onClick={() => setPageNumber((p) => p - 1)}>上一页</Button><span className="rounded bg-background px-2 py-1 text-xs">第 {pageNumber} / {pageCount || "…"} 页</span><Button size="sm" variant="outline" disabled={!pageCount || pageNumber >= pageCount} onClick={() => setPageNumber((p) => p + 1)}>下一页</Button></div>
+      <div className="sticky top-0 z-10 mb-2 flex flex-wrap items-center justify-center gap-2 rounded-lg bg-background/95 p-2 shadow-sm"><Button size="sm" variant="outline" disabled={pageNumber <= 1} onClick={() => setPageNumber((p) => p - 1)}>上一页</Button><span className="px-2 text-xs">第 {pageNumber} / {pageCount || "…"} 页</span><Button size="sm" variant="outline" disabled={!pageCount || pageNumber >= pageCount} onClick={() => setPageNumber((p) => p + 1)}>下一页</Button><input type="number" min={1} max={pageCount || undefined} value={pageInput} onChange={(event) => setPageInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") jumpToPage(); }} aria-label="跳转页码" className="w-16 rounded border px-2 py-1 text-sm" /><Button size="sm" variant="outline" disabled={!pageCount} onClick={jumpToPage}>跳转</Button>{nodeId ? <Button size="sm" disabled={!pageCount || savingPage} onClick={() => void saveCurrentPage()}>{savingPage ? "正在保存…" : confirmedPage === pageNumber ? "已设为本节页码" : "设为本节页码"}</Button> : null}</div>
       <div className="relative mx-auto w-fit"><canvas ref={canvasRef} className="block bg-white shadow" /><div ref={textRef} className="absolute left-0 top-0 cursor-text select-none" style={{ touchAction: "none" }} onPointerDown={startSelection} onPointerUp={finishSelection} /></div>
     </div>
     <aside className="overflow-auto rounded-2xl border bg-card p-4 shadow-sm">
@@ -483,6 +513,7 @@ interface NotesSectionProps {
   /** Opens one course file in the application-owned PDF reader. */
   initialFileJobId?: string | null;
   initialPage?: number | null;
+  initialNodeId?: string | null;
   onCloseReader?: () => void;
 }
 
@@ -606,6 +637,7 @@ export function NotesSection({
   immersive = false,
   initialFileJobId = null,
   initialPage = null,
+  initialNodeId = null,
   onCloseReader,
 }: NotesSectionProps) {
   const t = useT();
@@ -633,7 +665,7 @@ export function NotesSection({
   const [aiNoteResolvedNodeId, setAiNoteResolvedNodeId] = useState<string | null>(null);
   const [sourceFiles, setSourceFiles] = useState<UploadedCourseFile[]>([]);
   const [sourceFilesLoading, setSourceFilesLoading] = useState(true);
-  const [sourcePreview, setSourcePreview] = useState<{ url: string; jobId: string; name: string; kind: "pdf" | "document"; page?: number } | null>(null);
+  const [sourcePreview, setSourcePreview] = useState<{ url: string; jobId: string; name: string; kind: "pdf" | "document"; page?: number; nodeId?: string } | null>(null);
   const closeReader = useCallback(() => {
     setSourcePreview(null);
     onCloseReader?.();
@@ -767,6 +799,7 @@ export function NotesSection({
               name: initialFile.filename || initialFile.file_name || t("notes.originalPdf"),
               kind: (initialFile.filename || initialFile.file_name || "").toLowerCase().endsWith(".pdf") ? "pdf" : "document",
               page: initialPage ?? 1,
+              nodeId: initialNodeId ?? undefined,
             });
           }
           setSourceFilesLoading(false);
@@ -779,7 +812,7 @@ export function NotesSection({
         }
       });
     return () => { cancelled = true; };
-  }, [courseId, initialFileJobId, initialPage, t]);
+  }, [courseId, initialFileJobId, initialPage, initialNodeId, t]);
 
   useEffect(() => {
     if (!sourcePreview) return;
@@ -1053,6 +1086,7 @@ export function NotesSection({
                         name: file.filename || file.file_name || t("notes.originalPdf"),
                         kind: (file.filename || file.file_name || "").toLowerCase().endsWith(".pdf") ? "pdf" : "document",
                         page: page ?? 1,
+                        nodeId: isSelectedPdf ? selectedLearnableNode?.id : undefined,
                       });
                     }}
                     className="group flex w-full items-center gap-4 rounded-2xl border border-white/90 bg-white/85 px-4 py-4 text-left shadow-sm ring-1 ring-amber-100 transition duration-200 hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:border-border dark:bg-card/90 dark:ring-amber-900"
@@ -1062,7 +1096,7 @@ export function NotesSection({
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-semibold text-foreground">{file.filename || file.file_name || t("notes.originalPdf")}</span>
-                      <span className="mt-1 block text-xs text-muted-foreground">{t("notes.sourceFileHint")}</span>
+                      <span className="mt-1 block text-xs text-muted-foreground">{selectedLearnableNode?.source_file === (file.filename || file.file_name) && (file.filename || file.file_name || "").toLowerCase().endsWith(".pdf") ? (selectedLearnableNode.metadata?.source_pages?.[0] ? `定位到第 ${selectedLearnableNode.metadata.source_pages[0]} 页` : "暂未定位本节页码，将从文件首页打开") : t("notes.sourceFileHint")}</span>
                     </span>
                     <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition group-hover:bg-emerald-700">
                       {t("notes.openOriginal")}
@@ -1089,6 +1123,7 @@ export function NotesSection({
                         name: file.filename || file.file_name || t("notes.originalPdf"),
                         kind: (file.filename || file.file_name || "").toLowerCase().endsWith(".pdf") ? "pdf" : "document",
                         page: selectedDisplayNode.metadata?.source_pages?.[0] ?? 1,
+                        nodeId: selectedDisplayNode.id,
                       });
                     }}>打开原文精读</Button>
                   </div>
@@ -1121,7 +1156,9 @@ export function NotesSection({
           url={sourcePreview.url}
           courseId={courseId}
           jobId={sourcePreview.jobId}
+          nodeId={sourcePreview.nodeId}
           initialPage={sourcePreview.page ?? 1}
+          onPageSaved={() => void fetchContentTree(courseId)}
         /> : /\.(?:pptx?|docx?)$/i.test(sourcePreview.name)
           ? <PresentationStudyReader courseId={courseId} jobId={sourcePreview.jobId} filename={sourcePreview.name} initialPage={sourcePreview.page ?? 1} />
           : <DocumentStudyReader courseId={courseId} jobId={sourcePreview.jobId} filename={sourcePreview.name} />}

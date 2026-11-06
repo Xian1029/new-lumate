@@ -47,26 +47,53 @@ def _annotate_source_pages(nodes: list[CourseContentTree], file_path: str) -> No
     try:
         import pypdf
         reader = pypdf.PdfReader(file_path, strict=False)
-        pages = [re.sub(r"\s+", "", page.extract_text() or "") for page in reader.pages]
+        pages = [_page_match_text(page.extract_text() or "") for page in reader.pages]
     except Exception as exc:  # Page linking is an enhancement, never an upload blocker.
         logger.info("Skipping PDF page annotations for %s: %s", file_path, exc)
         return
 
+    annotate_nodes_from_page_text(nodes, pages)
+
+
+def _page_match_text(value: str) -> str:
+    """Normalize PDF and Markdown text in the same way for source anchors."""
+    return re.sub(r"[^\w\u4e00-\u9fff]", "", value or "").lower()
+
+
+def annotate_nodes_from_page_text(nodes: list[CourseContentTree], pages: list[str]) -> int:
+    """Conservatively link nodes to their original PDF pages.
+
+    Body anchors take precedence over headings, which also occur in a table
+    of contents. Ambiguous heading-only matches are intentionally left unset.
+    This function also powers the explicit legacy backfill command.
+    """
+    page_text = [_page_match_text(page) for page in pages]
+    updated = 0
     for node in nodes:
-        text = re.sub(r"\s+", "", node.content or "")
-        title = re.sub(r"\s+", "", node.title or "")
-        # Test several excerpts because a section can begin with a heading or
-        # extraction artefact that is absent from the PDF text layer.
-        excerpts = [text[index:index + 32] for index in range(0, max(0, min(len(text) - 23, 320)), 48)]
-        matched = [
-            number for number, page in enumerate(pages, start=1)
-            if (len(title) >= 4 and title in page)
-            or any(len(sample) >= 24 and sample in page for sample in excerpts)
-        ]
-        if matched:
-            metadata = dict(node.metadata_ or {})
-            metadata["source_pages"] = matched
-            node.metadata_ = metadata
+        if (node.metadata_ or {}).get("source_pages"):
+            continue
+        body = _page_match_text(node.content or "")
+        anchors = [body[i:i + 20] for i in (0, 40, 100, 180) if len(body[i:i + 20]) == 20]
+        body_hits = [i + 1 for i, page in enumerate(page_text) if any(anchor in page for anchor in anchors)]
+        if body_hits:
+            # A repeated passage in distant parts of the book is ambiguous;
+            # do not turn it into a misleading multi-chapter page range.
+            if max(body_hits) - min(body_hits) > 8:
+                continue
+            first = min(body_hits)
+            last = max(body_hits)
+            confidence = "body"
+        else:
+            continue
+        node.metadata_ = {
+            **(node.metadata_ or {}),
+            "source_pages": list(range(first, last + 1)),
+            "source_page_start": first,
+            "source_page_end": last,
+            "source_page_confidence": confidence,
+        }
+        updated += 1
+    return updated
 
 # Marker model singleton — avoids reloading ~1GB models on every call
 _marker_models: dict | None = None
