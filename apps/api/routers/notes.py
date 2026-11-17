@@ -300,14 +300,6 @@ async def delete_personal_note(
     await get_course_or_404(db, course_id, user_id=user.id)
 
     from models.generated_asset import GeneratedAsset
-    node_result = await db.execute(
-        select(CourseContentTree).where(
-            CourseContentTree.id == node_id,
-            CourseContentTree.course_id == course_id,
-        )
-    )
-    node = node_result.scalar_one_or_none()
-    raw_source = normalize_generated_markdown(node.content) if node and node.content else ""
     result = await db.execute(
         select(GeneratedAsset).where(
             GeneratedAsset.id == note_id,

@@ -190,9 +190,9 @@ async def _auto_recall_memories(
         logger.exception("Auto-recall type fetch failed: %s", e)
 
     # 3. If conversation history is long, search by topic summary
-    if len(conversation_history) > HISTORY_KEEP_RECENT:
+    if len(conversation_history) > HISTORY_KEEP_RECENT and len(all_memories) < 2:
         try:
-            topic = await _extract_topic_summary(conversation_history)
+            topic = await asyncio.wait_for(_extract_topic_summary(conversation_history), timeout=2.0)
             if topic and topic != user_message:
                 topic_results = await retrieve_memories(
                     db, user_id, topic, course_id, limit=3,

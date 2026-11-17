@@ -85,11 +85,13 @@ async def load_context(
 
         async def _load_content():
             try:
+                if str(ctx.tab_context.get("selected_node_content") or "").strip():
+                    return []
                 async with _db_factory() as _db:
                     if ctx.intent in (IntentType.LEARN, IntentType.GENERAL):
                         from services.search.rag_fusion import rag_fusion_search
                         return await rag_fusion_search(
-                            _db, ctx.course_id, ctx.user_message, limit=5,
+                            _db, ctx.course_id, ctx.user_message, limit=5, n_variants=0,
                         )
                     else:
                         from services.search.hybrid import hybrid_search
@@ -126,9 +128,11 @@ async def load_context(
     else:
         # Sequential loading
         async def search_content():
+            if str(ctx.tab_context.get("selected_node_content") or "").strip():
+                return []
             if ctx.intent in (IntentType.LEARN, IntentType.GENERAL):
                 from services.search.rag_fusion import rag_fusion_search
-                return await rag_fusion_search(db, ctx.course_id, ctx.user_message, limit=5)
+                return await rag_fusion_search(db, ctx.course_id, ctx.user_message, limit=5, n_variants=0)
             else:
                 from services.search.hybrid import hybrid_search
                 return await hybrid_search(db, ctx.course_id, ctx.user_message, limit=5)

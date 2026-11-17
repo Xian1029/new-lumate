@@ -296,7 +296,10 @@ export function GraphView({ courseId, focusTerms, activeMaterialId }: GraphViewP
   return (
     <div role="region" aria-label={t("ui.knowledge_graph")} className="flex h-full min-h-0 flex-col overflow-hidden bg-[#f7f8f6]" data-testid="graph-panel">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-4 py-3">
-        <p className="text-sm font-semibold text-brand">知识图谱</p>
+        <div>
+          <p className="text-sm font-semibold text-brand">知识图谱</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">节点百分比表示单个知识点的掌握度</p>
+        </div>
         <div className="inline-flex rounded-xl bg-muted p-1" role="tablist" aria-label="知识图谱视图">
           <button type="button" role="tab" aria-selected={false} onClick={() => setView("path")} className="rounded-lg px-3 py-2 text-sm text-muted-foreground hover:text-foreground">推荐学习路径</button>
           <button type="button" role="tab" aria-selected className="rounded-lg bg-card px-3 py-2 text-sm font-semibold shadow-sm">完整知识图谱</button>

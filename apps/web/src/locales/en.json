@@ -351,6 +351,8 @@
   "flashcard.saveNewHint": "Keep the existing set and save the currently displayed cards as a separate set.",
   "progress.title": "Learning Progress",
   "progress.mastered": "Mastered",
+  "progress.averageMastery": "Average mastery of studied content",
+  "progress.metricsHint": "Average mastery covers recorded learning only. Completion is the share of learnable items reviewed or mastered. Graph percentages describe individual concepts.",
   "progress.reviewed": "Reviewed",
   "progress.inProgress": "In Progress",
   "progress.notStarted": "Not Started",

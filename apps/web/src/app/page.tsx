@@ -37,6 +37,19 @@ export default function LearningHomePage() {
   }, [overview?.current_learning_action?.href, router]);
 
   useEffect(() => {
+    if (!accessReady || !overview) return;
+    // Warm only the most likely destinations after the home content is ready.
+    // A short delay keeps prefetching from competing with the initial render.
+    const timer = window.setTimeout(() => {
+      router.prefetch("/learning-plans");
+      for (const space of overview.learning_spaces.slice(0, 3)) {
+        router.prefetch(space.target_route || `/course/${space.id}`);
+      }
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [accessReady, overview, router]);
+
+  useEffect(() => {
     void getMe().then(async (user) => {
       setAccount(user);
       if (user.must_change_password) { router.replace("/change-password"); return; }

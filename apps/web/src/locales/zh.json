@@ -351,6 +351,8 @@
   "flashcard.saveNewHint": "保留原卡片组，同时把当前显示的卡片保存为一个独立的新卡片组。",
   "progress.title": "学习进度",
   "progress.mastered": "已掌握",
+  "progress.averageMastery": "已学习内容平均掌握度",
+  "progress.metricsHint": "平均掌握度仅统计已有学习记录；完成度按已复习或已掌握的内容占全部可学习内容的比例计算。图谱百分比表示单个知识点的掌握度。",
   "progress.reviewed": "已复习",
   "progress.inProgress": "学习中",
   "progress.notStarted": "未开始",

@@ -77,7 +77,7 @@ async def rag_fusion_search(
     This improves recall for ambiguous or complex learning questions.
     """
     # Generate query variants
-    variants = await generate_query_variants(query, n_variants, course_context)
+    variants = await generate_query_variants(query, n_variants, course_context) if n_variants > 0 else []
     decomposed = decompose_search_query(query, max_facets=max(2, n_variants))
 
     # Always include the original query

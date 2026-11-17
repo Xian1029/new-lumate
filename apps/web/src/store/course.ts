@@ -22,6 +22,7 @@ import { ttlCache } from "@/lib/cache";
 const COURSES_CACHE_KEY = "courses:overview";
 const COURSES_TTL_MS = 60_000; // 60 seconds
 let contentTreeRequestId = 0;
+let contentTreeInFlight: { courseId: string; promise: Promise<void> } | null = null;
 
 interface CourseState {
   courses: Course[];
@@ -70,10 +71,20 @@ export const useCourseStore = create<CourseState>((set, get) => ({
   },
 
   setActiveCourse: (course) => {
-    contentTreeRequestId += 1;
-    set({ activeCourse: course, contentTree: [], contentTreeCourseId: null, error: null });
-    if (course) {
-      get().fetchContentTree(course.id);
+    if (course && get().activeCourse?.id === course.id) {
+      set({ activeCourse: course });
+      return;
+    }
+    if (!course || contentTreeInFlight?.courseId !== course.id) contentTreeRequestId += 1;
+    const hasTree = course && get().contentTreeCourseId === course.id;
+    set({
+      activeCourse: course,
+      contentTree: hasTree ? get().contentTree : [],
+      contentTreeCourseId: hasTree ? course.id : null,
+      error: null,
+    });
+    if (course && !hasTree) {
+      void get().fetchContentTree(course.id);
     }
   },
 
@@ -98,18 +109,25 @@ export const useCourseStore = create<CourseState>((set, get) => ({
   },
 
   fetchContentTree: async (courseId) => {
+    if (contentTreeInFlight?.courseId === courseId) return contentTreeInFlight.promise;
     const requestId = ++contentTreeRequestId;
     if (get().contentTreeCourseId !== courseId) {
       set({ contentTree: [], contentTreeCourseId: null });
     }
-    try {
-      const tree = await getContentTree(courseId);
-      if (requestId !== contentTreeRequestId) return;
-      set({ contentTree: tree, contentTreeCourseId: courseId, error: null });
-    } catch (error) {
-      if (requestId !== contentTreeRequestId) return;
-      const message = error instanceof Error ? error.message : t("ui.failed_load_content");
-      set({ error: message });
+    const promise = (async () => {
+      try {
+        const tree = await getContentTree(courseId);
+        if (requestId !== contentTreeRequestId) return;
+        set({ contentTree: tree, contentTreeCourseId: courseId, error: null });
+      } catch (error) {
+        if (requestId !== contentTreeRequestId) return;
+        const message = error instanceof Error ? error.message : t("ui.failed_load_content");
+        set({ error: message });
+      }
+    })();
+    contentTreeInFlight = { courseId, promise };
+    try { await promise; } finally {
+      if (contentTreeInFlight?.promise === promise) contentTreeInFlight = null;
     }
   },
 

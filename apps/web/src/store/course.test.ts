@@ -122,6 +122,19 @@ describe("useCourseStore", () => {
   });
 
   describe("fetchContentTree", () => {
+    it("shares a pending request when the same course opens twice", async () => {
+      let resolveTree!: (value: unknown) => void;
+      mockGetContentTree.mockImplementationOnce(() => new Promise((resolve) => { resolveTree = resolve; }) as never);
+
+      const first = useCourseStore.getState().fetchContentTree("c1");
+      const second = useCourseStore.getState().fetchContentTree("c1");
+      expect(mockGetContentTree).toHaveBeenCalledTimes(1);
+
+      resolveTree([{ id: "ch1", title: "Chapter 1", children: [] }]);
+      await Promise.all([first, second]);
+      expect(useCourseStore.getState().contentTreeCourseId).toBe("c1");
+    });
+
     it("fetches and sets content tree", async () => {
       const tree = [{ id: "ch1", title: "Chapter 1", children: [] }];
       mockGetContentTree.mockResolvedValueOnce(tree as never);

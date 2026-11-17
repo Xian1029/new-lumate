@@ -125,7 +125,7 @@ export function ProgressView({ courseId }: ProgressViewProps) {
 
       <div className="grid grid-cols-2 gap-2">
         {[
-          { label: t("progress.mastered"), value: `${Math.round(data.average_mastery)}%` },
+          { label: t("progress.averageMastery"), value: `${Math.round(data.average_mastery * 100)}%` },
           { label: t("progress.completion"), value: `${Math.round(progressPercent)}%` },
           { label: t("progress.totalTime"), value: fmtTime(data.total_study_minutes) },
           { label: t("progress.notStarted"), value: `${data.not_started}` },
@@ -139,6 +139,10 @@ export function ProgressView({ courseId }: ProgressViewProps) {
           </div>
         ))}
       </div>
+
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        {t("progress.metricsHint")}
+      </p>
 
       <div className="space-y-1.5">
         <div className="flex items-center justify-between text-xs text-muted-foreground">
